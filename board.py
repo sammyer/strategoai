@@ -189,6 +189,9 @@ class Board:
 							moves.append(move)
 		return moves
 
+	def applyMove2(self,fromx,fromy,tox,toy):
+		self.applyMove(np.array([[fromx,fromy],[tox,toy]]))
+
 	def applyMove(self,move):
 		fromPos,toPos=move
 		fromPiece=self[fromPos]
@@ -201,13 +204,13 @@ class Board:
 			self[fromPos]=self.EMPTY # from pos is now empty
 			self[toPos]=fromPiece
 		else:
-			win=np.sign(toPiece.pid-fromPiece.pid)
+			win=np.sign(fromPiece.pid-toPiece.pid)
 			if fromPiece.pid==Piece.MINER and toPiece.pid==Piece.BOMB:
 				win=1
-			if toPiece.pid==Piece.FLAG:
+			elif toPiece.pid==Piece.FLAG:
 				win=1
 				self.endgame=True
-			if fromPiece.pid==Piece.SPY and toPiece.pid==Piece.MARSHALL:
+			elif fromPiece.pid==Piece.SPY and toPiece.pid==Piece.MARSHALL:
 				win=1
 			fromPiece.seen=True
 			
@@ -283,7 +286,7 @@ class Board:
 			# Points for pieces not captured
 			points = (piecesLeft[row]*self.PIECE_VALUES).sum()
 			# Deduct points for pieces seen
-			points -= (seenCount[row]*self.PIECE_VALUES).sum()*0.5
+			points -= (seenCount[row]*self.PIECE_VALUES).sum()*0.4
 			# Deduct points for no miners left
 			if piecesLeft[row,Piece.MINER]==0:
 				points -= 20
