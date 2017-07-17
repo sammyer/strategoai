@@ -15,27 +15,28 @@ def normalize(x):
 		return x/s
 
 class Piece:
+	FLAG=0
 	SPY=1
 	SCOUT=2
 	MINER=3
 	GENERAL=9
 	MARSHALL=10
 	BOMB=11
-	FLAG=12
 	
-	EMPTY=0
+	EMPTY=14
 	LAKE=15
 	
-	def __init__(self,pid=0,player=0):
+	def __init__(self,pid=EMPTY,player=0):
 		self.pid=pid
 		self.player=player
-		self.seen=False
-		self.moved=False
-		self.captured=False
+		self._seen=False
+		self._moved=False
+		self._captured=False
+		self.possibleIds=np.ones((12,)) # unknown piece
 	
 	def char(self):
-		p1=" 1234567890bf  X"
-		p2=" 1234567890BF  X"
+		p1="f1234567890b   X"
+		p2="F1234567890B   X"
 		if self.player==1:
 			return p1[self.pid]
 		else:
@@ -46,13 +47,50 @@ class Piece:
 		piece.seen=self.seen
 		piece.moved=self.moved
 		piece.captured=self.captured
+		piece.possibleIds=self.possibleIds.copy()
 		return piece
 	
 	def isUnseen(self,byPlayer):
-		return not (self.player==byPlayer or self.captured or self.moved)
+		return not (self.player==byPlayer or self.captured or self.seen)
+	
+	@property
+	def seen(self):
+		return self._seen
+
+	@property
+	def moved(self):
+		return self._moved
+		
+	@property
+	def captured(self):
+		return self._captured
+	
+	@seen.setter
+	def seen(self,seen):
+		self._seen=seen
+		self.possibleIds=0
+		self.possibleIds[self.pid]=1
+
+	@captured.setter
+	def captured(self,captured):
+		self._captured=captured
+		self.possibleIds=0
+		self.possibleIds[self.pid]=1
+		
+	@moved.setter
+	def moved(self,moved):
+		self._moved=moved
+		self.possibleIds[self.BOMB]=0
+		self.possibleIds[self.FLAG]=0
+		
+
 	
 
 class Board:
+	PIECE_COUNTS=[1,1,8,5,4,4,4,3,2,1,1,6]
+	PIECE_VALUES=np.array([100,2,3,6,4,5,6,7,9,12,15,8])
+	EMPTY=Piece()
+	LAKE=Piece(Piece.LAKE,0)
 
 	def __init__(self,board=None,pieces=None):
 		if pieces is None:
@@ -62,16 +100,15 @@ class Board:
 			self.pieces=pieces
 
 	def resetBoard(self):
-		pieceCounts=[0,1,8,5,4,4,4,3,2,1,1,6,1]
 		self.pieces=[]
 		for player in (1,2):
-			for pieceId,count in enumerate(pieceCounts):
+			for pieceId,count in enumerate(self.PIECE_COUNTS):
 				for i in range(count):
 					self.pieces.append(Piece(pieceId,player))
-		self.board=[[Piece() for i in range(10)] for j in range(10)]
+		self.board=[[self.EMPTY for i in range(10)] for j in range(10)]
 		for x in (2,3,6,7):
 			for y in (4,5):
-				self.board[x][y]=Piece(Piece.LAKE,0)
+				self.board[x][y]=self.LAKE
 		
 	
 	def placeRandom(self):
@@ -88,9 +125,9 @@ class Board:
 			return False
 		fromPiece=self[fromPos]
 		toPiece=self[toPos]
-		if fromPiece.pid in (0,11,12,15):
+		if fromPiece.pid in (Piece.FLAG, Piece.BOMB, Piece.EMPTY, Piece.LAKE):
 			return False
-		if toPiece.pid==15:
+		if toPiece.pid==Piece.LAKE:
 			return False
 		if toPiece.player==fromPiece.player:
 			return False
@@ -130,7 +167,7 @@ class Board:
 				fromPiece=self.board[x][y]
 				if not fromPiece.player==player:
 					continue
-				if fromPiece.pid in (0,11,12,15):
+				if fromPiece.pid in (Piece.FLAG, Piece.BOMB, Piece.EMPTY, Piece.LAKE):
 					continue
 				if fromPiece.pid==Piece.SCOUT:
 					for i in range(10):
@@ -157,11 +194,12 @@ class Board:
 		fromPiece=self[fromPos]
 		toPiece=self[toPos]
 		fromPiece.moved=True
-		if toPiece.pid==0:
-			win=1
+		if toPiece.pid == Piece.EMPTY:
 			if np.max(toPos-fromPos)>1:
 				# Now we know it's a scout
 				fromPiece.seen=True
+			self[fromPos]=self.EMPTY # from pos is now empty
+			self[toPos]=fromPiece
 		else:
 			win=np.sign(toPiece.pid-fromPiece.pid)
 			if fromPiece.pid==Piece.MINER and toPiece.pid==Piece.BOMB:
@@ -173,48 +211,44 @@ class Board:
 				win=1
 			fromPiece.seen=True
 			
-		self[fromPos]=Piece() # from pos is now empty
-		if win==1:
-			toPiece.captured=True
-			fromPiece.seen=True
-			self[toPos]=fromPiece
-		elif win==0:
-			fromPiece.captured=True
-			toPiece.captured=True
-			self[toPos]=Piece()
-		elif win==-1:
-			fromPiece.captured=True
-			toPiece.seen=True
+			self[fromPos]=self.EMPTY # from pos is now empty
+			if win==1:
+				toPiece.captured=True
+				fromPiece.seen=True
+				self[toPos]=fromPiece
+			elif win==0:
+				fromPiece.captured=True
+				toPiece.captured=True
+				self[toPos]=self.EMPTY
+			elif win==-1:
+				fromPiece.captured=True
+				toPiece.seen=True
 	
 	# AI	
 	
 	def addProbabilities(self,knownPlayer):
-		immovableMask=np.zeros((15,))
-		immovableMask[11:13]=1
-		movableMask=1-immovableMask
-		
-		unmovedCount=0
-		unseen=np.zeros((15,))
-		for piece in self.pieces:
-			if piece.isUnseen(knownPlayer):
-				if not piece.moved:
-					unmovedCount+=1
-				unseen[piece.pid]+=1
-			
-		movedProb=normalize(unseen*movableMask)
-		if unmovedCount==0:
-			unmovedProb=np.zeros((15,))
-		else:
-			unmovedProb=(unseen*immovableMask)/float(unmovedCount)
-			unmovedProb+=movedProb*(1-unmovedProb.sum())
-
-		self.pieceProbs={}
-		for piece in self.pieces:
-			if piece.isUnseen(knownPlayer):
-				if piece.moved:
-					self.pieceProbs[piece]=movedProb
-				else:
-					self.pieceProbs[piece]=unmovedProb
+		pieces=[piece for piece in self.pieces if piece.player == knownPlayer]
+		counts=np.array(self.PIECE_COUNTS)
+		pieceMtx=np.array([piece.possibleIds for piece in pieces],dtype=float)
+		probabilities=np.zeros((len(pieces),12))
+		for i in range(len(pieces)):
+			if np.count_nonzero(pieceMtx[i])==1:
+				pieceId=np.where(pieceMtx[i]!=0)[0][0]
+				probabilities[i,pieceId]=1
+				pieceMtx[i]=0
+				counts[pieceId]-=1
+		for i in range(len(counts)):
+			if counts[i]==0:
+				pieceMtx[:,i]=0
+		nonzeroRows=np.where(pieceMtx.sum(1)>0)[0]
+		pieceMtx=pieceMtx[nonzeroRows]
+		pieceMtx/=pieceMtx.sum(1,keepdims=True)
+		pieceMtx/=pieceMtx.sum(0,keepdims=True)
+		pieceMtx/=pieceMtx.sum(1,keepdims=True)
+		probabilities[nonzeroRows]=pieceMtx
+		for i in range(len(pieces)):
+			pieces[i].probs=probabilities[i]
+		#self.probabilities=probabilities
 		
 	
 	def applyMoveProbabilistic(self,move,knownPlayer):
@@ -229,21 +263,83 @@ class Board:
 		Points for unprotected flag??
 		Points for invincible pieces
 		"""
-		values=[0,10,4,6,4,5,6,7,9,12,15,8,100]
 		points=0
+
+		piecesLeft=np.array([self.PIECE_COUNTS,self.PIECE_COUNTS])
+		seenCount=np.zeros(piecesLeft.shape)
 		for piece in self.pieces:
-			sign = 1 if piece.player==player else -1
-			value=values[piece.pid]
+			row=0 if piece.player == player else 1
 			if piece.captured:
-				pass
+				piecesLeft[row][piece.pid]-=1
+			elif piece.seen:
+				seenCount[row][piece.pid]+=1
+		print(piecesLeft)
+		print(seenCount)
+
+		totalPoints=0		
+		for row in (0,1):
+			other=1-row
+			
+			# Points for pieces not captured
+			points = (piecesLeft[row]*self.PIECE_VALUES).sum()
+			# Deduct points for pieces seen
+			points -= (seenCount[row]*self.PIECE_VALUES).sum()*0.5
+			# Deduct points for no miners left
+			if piecesLeft[row,Piece.MINER]==0:
+				points -= 20
+				
+			# Points for having a marshall and spy captured
+			if piecesLeft[row,Piece.MARSHALL]==1 and piecesLeft[other,Piece.SPY]==0:
+				if piecesLeft[other,Piece.MARSHALL]==0:
+					points += 16
+				else:
+					points += 8
+			# Points for every piece which outranks all of the opponents pieces
+			opponentHighestRank=0
+			for rank in range(2,Piece.BOMB):
+				if piecesLeft[other,rank]>0:
+					opponentHighestRank=rank
+			for rank in range(opponentHighestRank+1,Piece.MARSHALL):
+				points += 16*piecesLeft[row,rank]
+			
+			# Add to total
+			if row==0:
+				totalPoints += points
+			else:
+				totalPoints -= points
+
+		# Points for advancing pieces into opponents area
+		for x in range(10):
+			for y in range(10):
+				piece=self.board[x][y]
+				if piece.player==0:
+					continue
+				if piece.player==1:
+					numSpaces = max(6-y, 0)
+				elif piece.player==2:
+					numSpaces = max(y-3, 0)
+				if piece.player==player:
+					totalPoints += numSpaces*0.1
+				else:
+					totalPoints -= numSpaces*0.1
+					
+		return totalPoints
 		
 
 	def __repr__(self):
 		return '\n'.join([''.join([self.board[x][y].char() for x in range(10)]) for y in range(10)])						
 
 	def copy(self):
-		board=Board()
-		
+		other=Board()
+		other.pieces=[piece.copy() for piece in self.pieces]
+		pieceMap={i:j for i,j in zip(self.pieces,other.pieces)}
+		pieceMap[self.EMPTY]=self.EMPTY
+		pieceMap[self.LAKE]=self.LAKE
+		other.board=[[pieceMap[piece] for piece in row] for row in self.board]
+		return other
 
 board=Board()
 board.placeRandom()
+moves=board.getValidMoves(1)
+board.applyMove(moves[0])
+print(board.heuristic())
