@@ -3,6 +3,10 @@
 Created on Fri Jul 07 12:38:17 2017
 
 @author: sam
+
+TODO: make ProbabilisticPiece and ProbabilisticBoard
+make heuristic probabilistic
+
 """
 
 import numpy as np
@@ -29,9 +33,9 @@ class Piece:
 	def __init__(self,pid=EMPTY,player=0):
 		self.pid=pid
 		self.player=player
-		self._seen=False
-		self._moved=False
-		self._captured=False
+		self.seen=False
+		self.moved=False
+		self.captured=False
 		self.possibleIds=np.ones((12,)) # unknown piece
 	
 	def char(self):
@@ -49,41 +53,34 @@ class Piece:
 		piece.captured=self.captured
 		piece.possibleIds=self.possibleIds.copy()
 		return piece
-	
-	def isUnseen(self,byPlayer):
-		return not (self.player==byPlayer or self.captured or self.seen)
-	
-	@property
-	def seen(self):
-		return self._seen
 
-	@property
-	def moved(self):
-		return self._moved
-		
-	@property
-	def captured(self):
-		return self._captured
+	def updateIds(self):
+		if self.seen or self.captured:
+			self.possibleIds.fill(0)
+			self.possibleIds[self.pid]=1
+		if self.moved:
+			self.possibleIds[self.BOMB]=0
+			self.possibleIds[self.FLAG]=0
 	
-	@seen.setter
-	def seen(self,seen):
-		self._seen=seen
-		self.possibleIds=0
-		self.possibleIds[self.pid]=1
-
-	@captured.setter
-	def captured(self,captured):
-		self._captured=captured
-		self.possibleIds=0
-		self.possibleIds[self.pid]=1
-		
-	@moved.setter
-	def moved(self,moved):
-		self._moved=moved
-		self.possibleIds[self.BOMB]=0
-		self.possibleIds[self.FLAG]=0
-		
-
+	def defeats(self,defender):
+		win=np.sign(self.pid - defender.pid)
+		if self.pid==Piece.MINER and defender.pid==Piece.BOMB:
+			win=1
+		elif self.pid==Piece.SPY and defender.pid==Piece.MARSHALL:
+			win=1
+		return win
+	
+	def getAttackWinMask(self):
+		mask=np.zeros((12,),dtype=int)
+		mask[:self.pid]=1
+		if self.pid==Piece.MINER: mask[Piece.BOMB]=1
+		if self.pid==Piece.SPY: mask[Piece.MARSHALL]=1
+		return mask
+	
+	def getDefendWinMask(self):
+		mask=np.zeros((12,),dtype=int)
+		mask[:self.pid]=1
+		return mask
 	
 
 class Board:
@@ -98,6 +95,7 @@ class Board:
 		else:
 			self.board=board
 			self.pieces=pieces
+		self.hasProbabilities=False
 
 	def resetBoard(self):
 		self.pieces=[]
@@ -134,7 +132,6 @@ class Board:
 			
 		dist=toPos-fromPos
 		if np.count_nonzero(dist)!=1:
-			print(5)
 			return False
 		if fromPiece.pid==Piece.SCOUT:
 			direction=np.sign(dist)
@@ -189,8 +186,9 @@ class Board:
 							moves.append(move)
 		return moves
 
-	def applyMove2(self,fromx,fromy,tox,toy):
-		self.applyMove(np.array([[fromx,fromy],[tox,toy]]))
+	def applyMove2(self,fromX,fromY,toX,toY):
+		move=np.array([[fromX,fromY],[toX,toY]])
+		self.applyMove(move)
 
 	def applyMove(self,move):
 		fromPos,toPos=move
@@ -204,14 +202,8 @@ class Board:
 			self[fromPos]=self.EMPTY # from pos is now empty
 			self[toPos]=fromPiece
 		else:
-			win=np.sign(fromPiece.pid-toPiece.pid)
-			if fromPiece.pid==Piece.MINER and toPiece.pid==Piece.BOMB:
-				win=1
-			elif toPiece.pid==Piece.FLAG:
-				win=1
-				self.endgame=True
-			elif fromPiece.pid==Piece.SPY and toPiece.pid==Piece.MARSHALL:
-				win=1
+			win = fromPiece.defeats(toPiece)
+			if toPiece.pid==Piece.FLAG: self.endgame=True
 			fromPiece.seen=True
 			
 			self[fromPos]=self.EMPTY # from pos is now empty
@@ -226,11 +218,13 @@ class Board:
 			elif win==-1:
 				fromPiece.captured=True
 				toPiece.seen=True
+		fromPiece.updateIds()
+		toPiece.updateIds()
 	
 	# AI	
 	
 	def addProbabilities(self,knownPlayer):
-		pieces=[piece for piece in self.pieces if piece.player == knownPlayer]
+		pieces=[piece for piece in self.pieces if piece.player != knownPlayer]
 		counts=np.array(self.PIECE_COUNTS)
 		pieceMtx=np.array([piece.possibleIds for piece in pieces],dtype=float)
 		probabilities=np.zeros((len(pieces),12))
@@ -252,10 +246,133 @@ class Board:
 		for i in range(len(pieces)):
 			pieces[i].probs=probabilities[i]
 		#self.probabilities=probabilities
-		
+		self.hasProbabilities=True
+	
+	def applyMoveProb(self,fromX,fromY,toX,toY,knownPlayer):
+		move=np.array([[fromX,fromY],[toX,toY]])
+		return self.applyMoveProbabilistic(move,knownPlayer)
 	
 	def applyMoveProbabilistic(self,move,knownPlayer):
-		pass
+		if not self.hasProbabilities:
+			self.addProbabilities(knownPlayer)
+			
+		fromPos,toPos=move
+		fromPiece=self[fromPos]
+		toPiece=self[toPos]
+	
+		# Handle case of moving without attacking
+		boards=[]
+		if toPiece.pid == Piece.EMPTY:
+			newBoard=self.copy()
+			fromPiece=newBoard[fromPos]
+			fromPiece.moved=True
+			if np.max(toPos-fromPos)>1:
+				# Now we know it's a scout
+				fromPiece.seen=True
+			newBoard[fromPos]=self.EMPTY # from pos is now empty
+			newBoard[toPos]=fromPiece
+			boards.append((newBoard,1.0))
+
+		elif fromPiece.player == knownPlayer:
+			winMask = fromPiece.getAttackWinMask()
+			loseMask = 1-winMask
+			loseMask[fromPiece.pid] = 0
+			tieMask=0*winMask
+			tieMask[fromPiece.pid] = 1
+			
+			winProb = (winMask*toPiece.probs).sum()
+			tieProb = toPiece.probs[fromPiece.pid]
+			loseProb = (loseMask*toPiece.probs).sum()
+			
+			if winProb>0:
+				newBoard = self.copy()
+				fromPiece = newBoard[fromPos]
+				toPiece = newBoard[toPos]
+				fromPiece.moved = True
+				fromPiece.seen = True
+				toPiece.captured = True
+				newBoard[fromPos]=self.EMPTY # from pos is now empty
+				newBoard[toPos]=fromPiece
+				fromPiece.updateIds()
+				toPiece.possibleIds*=winMask
+				boards.append((newBoard,winProb))
+			if tieProb>0:
+				newBoard = self.copy()
+				fromPiece = newBoard[fromPos]
+				toPiece = newBoard[toPos]
+				fromPiece.moved = True
+				fromPiece.captured = True
+				toPiece.captured = True
+				newBoard[fromPos]=self.EMPTY # from pos is now empty
+				newBoard[toPos]=self.EMPTY
+				fromPiece.updateIds()
+				toPiece.possibleIds*=tieMask
+				boards.append((newBoard,tieProb))
+			if loseProb>0:
+				newBoard = self.copy()
+				fromPiece = newBoard[fromPos]
+				toPiece = newBoard[toPos]
+				fromPiece.moved = True
+				fromPiece.captured = True
+				toPiece.seen = True
+				newBoard[fromPos]=self.EMPTY # from pos is now empty
+				fromPiece.updateIds()
+				toPiece.possibleIds*=loseMask
+				boards.append((newBoard,loseProb))
+
+
+		else:
+			# Attacker lose = defender win
+			loseMask = toPiece.getDefendWinMask()
+			winMask = 1-loseMask
+			winMask[fromPiece.pid] = 0
+			tieMask=0*winMask
+			tieMask[fromPiece.pid] = 1
+			winMask[(Piece.BOMB, Piece.FLAG)]=0
+			loseMask[(Piece.BOMB, Piece.FLAG)]=0
+			
+			winProb = (winMask*fromPiece.probs).sum()
+			tieProb = fromPiece.probs[toPiece.pid]
+			loseProb = (loseMask*fromPiece.probs).sum()
+			
+			if winProb>0:
+				newBoard = self.copy()
+				fromPiece = newBoard[fromPos]
+				toPiece = newBoard[toPos]
+				fromPiece.moved = True
+				fromPiece.seen = True
+				toPiece.captured = True
+				newBoard[fromPos]=self.EMPTY # from pos is now empty
+				newBoard[toPos]=fromPiece
+				fromPiece.possibleIds*=winMask
+				toPiece.updateIds()
+				boards.append((newBoard,winProb))
+			if tieProb>0:
+				newBoard = self.copy()
+				fromPiece = newBoard[fromPos]
+				toPiece = newBoard[toPos]
+				fromPiece.moved = True
+				fromPiece.captured = True
+				toPiece.captured = True
+				newBoard[fromPos]=self.EMPTY # from pos is now empty
+				newBoard[toPos]=self.EMPTY
+				fromPiece.possibleIds*=tieMask
+				toPiece.updateIds()
+				boards.append((newBoard,tieProb))
+			if loseProb>0:
+				newBoard = self.copy()
+				fromPiece = newBoard[fromPos]
+				toPiece = newBoard[toPos]
+				fromPiece.moved = True
+				fromPiece.captured = True
+				toPiece.seen = True
+				newBoard[fromPos]=self.EMPTY # from pos is now empty
+				fromPiece.possibleIds*=loseMask
+				toPiece.updateIds()
+				boards.append((newBoard,loseProb))
+		
+		return boards
+
 			
 	def heuristic(self,player=1):
 		"""
@@ -336,13 +453,21 @@ class Board:
 		other=Board()
 		other.pieces=[piece.copy() for piece in self.pieces]
 		pieceMap={i:j for i,j in zip(self.pieces,other.pieces)}
-		pieceMap[self.EMPTY]=self.EMPTY
-		pieceMap[self.LAKE]=self.LAKE
+		pieceMap[self.EMPTY]=other.EMPTY
+		pieceMap[self.LAKE]=other.LAKE
 		other.board=[[pieceMap[piece] for piece in row] for row in self.board]
 		return other
 
-board=Board()
-board.placeRandom()
-moves=board.getValidMoves(1)
-board.applyMove(moves[0])
+def makeBoard():
+	board=Board()
+	board.placeRandom()
+	moves=board.getValidMoves(1)
+	board.applyMove(moves[0])
+	moves=board.getValidMoves(1)
+	board.applyMove(moves[2])
+	return board
+
+#board2=makeBoard()
+board=board2.copy()
 print(board.heuristic())
+a10=board.applyMoveProb(0,4,0,3,1)
