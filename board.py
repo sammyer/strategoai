@@ -26,6 +26,8 @@ class Piece:
 	GENERAL=9
 	MARSHALL=10
 	BOMB=11
+	
+	CHARS="F1234567890B"
 		
 	def __init__(self,id,rank,player):
 		self.id=id
@@ -34,14 +36,7 @@ class Piece:
 		self.seen=False
 		self.moved=False
 		self.captured=False
-	
-	def char(self):
-		p1="f1234567890b   X"
-		p2="F1234567890B   X"
-		if self.player==1:
-			return p1[self.rank]
-		else:
-			return p2[self.rank]
+		self.char=('.' if self.player==2 else ' ')+self.CHARS[rank]
 
 	
 	def defeats(self,defender):
@@ -79,9 +74,9 @@ class Board:
 					self.pieces.append(Piece(pieceId,rank,player))
 					pieceId+=1
 		
-		self.grid=np.array((10,10),dtype=int)
-		self.grid.fill(self.EMPTY)			
-		self.grid[(2,3,6,7),(4,5)]=self.LAKE
+		self.grid=np.empty((10,10),dtype=int)
+		self.grid.fill(self.EMPTY)
+		self.grid[[2,3,6,7],4:6]=self.LAKE
 		
 	
 	def placeRandom(self):
@@ -89,31 +84,31 @@ class Board:
 		playerPieces=[np.random.permutation(pieces) for pieces in playerPieces]
 		for y in range(4):
 			for x in range(10):				
-				self[x,6+y]=playerPieces[0][y*10+x]
-				self[x,3-y]=playerPieces[1][y*10+x]
+				self.grid[x,6+y]=playerPieces[0][y*10+x].id
+				self.grid[x,3-y]=playerPieces[1][y*10+x].id
 
 		
 	def isValidPos(self,pos):
 		return np.min(pos)>=0 and np.max(pos)<10
 	
 	def isValidMove(self,move):
-		fromPos,toPos=move
+		fromPos,toPos=tuple(move[0]),tuple(move[1])
 		if not self.isValidPos(fromPos) or not self.isValidPos(toPos):
 			return False
-			
-		if self.grid[fromPos] in (self.EMPTY, self.LAKE):
+		
+		if self.grid[fromPos]<0:
 			return False
 		if self.grid[toPos]==self.LAKE:
 			return False
 		fromPiece=self[fromPos]
 		toPiece=self[toPos]
-		if not fromPiece.movable():
+		if not fromPiece.moveable:
 			return False
 			
 		if toPiece!=None and toPiece.player==fromPiece.player:
 			return False
 			
-		dist=toPos-fromPos
+		dist=np.array(toPos)-np.array(fromPos)
 		if np.count_nonzero(dist)!=1:
 			return False
 		if fromPiece.isScout():
@@ -130,7 +125,7 @@ class Board:
 		return True
 		
 	def __getitem__(self,pos):
-		pieceId=self.grid[pos]
+		pieceId=self.grid[tuple(pos)]
 		if pieceId<0:
 			return None
 		else:
@@ -148,24 +143,24 @@ class Board:
 				fromPiece=self[x,y]
 				if fromPiece==None or not fromPiece.player==player:
 					continue
-				if not fromPiece.movable():
+				if not fromPiece.moveable:
 					continue
 				if fromPiece.isScout():
 					for i in range(10):
 						toPos=fromPos.copy()
 						toPos[0]=i
-						move=(fromPos,toPos)
+						move=(tuple(fromPos),tuple(toPos))
 						if self.isValidMove(move):
 							moves.append(move)
 						toPos=fromPos.copy()
 						toPos[1]=i
-						move=(fromPos,toPos)
+						move=(tuple(fromPos),tuple(toPos))
 						if self.isValidMove(move):
 							moves.append(move)
 				else:
 					for direction in directions:
 						toPos=fromPos+direction
-						move=(fromPos,toPos)
+						move=(tuple(fromPos),tuple(toPos))
 						if self.isValidMove(move):
 							moves.append(move)
 		return moves
@@ -175,11 +170,11 @@ class Board:
 		self.applyMove(move)
 
 	def applyMove(self,move):
-		fromPos,toPos=move
+		fromPos,toPos=tuple(move[0]),tuple(move[1])
 		fromPiece=self[fromPos]
 		fromPiece.moved=True
 		if self.grid[toPos] == self.EMPTY:
-			if np.max(toPos-fromPos)>1:
+			if np.max(toPos[0]-fromPos[0], toPos[1]-fromPos[1])>1:
 				# Now we know it's a scout
 				fromPiece.seen=True
 			self.grid[fromPos]=self.EMPTY # from pos is now empty
@@ -204,21 +199,17 @@ class Board:
 				toPiece.seen=True
 	
 
+	def charAt(self,x,y):
+		id=self.grid[x,y]
+		if id==self.EMPTY:
+			return "  "
+		elif id==self.LAKE:
+			return " X"
+		else:
+			return self.pieces[id].char
 
 	def __repr__(self):
-		return '\n'.join([''.join([self.board[x][y].char() for x in range(10)]) for y in range(10)])						
+		return '\n'.join([''.join([self.charAt(x,y) for x in range(10)]) for y in range(10)])						
 
 
-def makeBoard():
-	board=Board()
-	board.placeRandom()
-	moves=board.getValidMoves(1)
-	board.applyMove(moves[0])
-	moves=board.getValidMoves(1)
-	board.applyMove(moves[2])
-	return board
 
-#board2=makeBoard()
-board=board2.copy()
-print(board.heuristic())
-a10=board.applyMoveProb(0,4,0,3,1)

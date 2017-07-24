@@ -13,6 +13,7 @@ class ProbPiece(Piece):
 		self.player=piece.player
 		self.captured=piece.captured
 		self.seen=piece.seen
+		self.char=piece.char
 		if isKnown:
 			self.rank=piece.rank
 			
@@ -20,37 +21,29 @@ class ProbPiece(Piece):
 			self.possibleIds=piece.possibleIds.copy()
 		else:
 			
-			if self.seen or self.captured or isKnown:
+			if piece.seen or piece.captured or isKnown:
 				self.possibleIds=np.zeros((12,),dtype=int)
 				self.possibleIds[piece.rank]=1
 			else:
 				self.possibleIds=np.ones((12,),dtype=int) # unknown piece
-			if self.moved:
+			if piece.moved:
 				self.possibleIds[Piece.BOMB]=0
 				self.possibleIds[Piece.FLAG]=0			
 	
-
-	def updateIds(self):
-		if self.seen or self.captured:
-			self.possibleIds.fill(0)
-			self.possibleIds[self.pid]=1
-		if self.moved:
-			self.possibleIds[self.BOMB]=0
-			self.possibleIds[self.FLAG]=0
 	
 	def defeats(self,defender):
 		raise Exception("function not applicable")
 	
 	def getAttackWinMask(self):
 		mask=np.zeros((12,),dtype=int)
-		mask[:self.pid]=1
-		if self.pid==Piece.MINER: mask[Piece.BOMB]=1
-		if self.pid==Piece.SPY: mask[Piece.MARSHALL]=1
+		mask[:self.rank]=1
+		if self.rank==Piece.MINER: mask[Piece.BOMB]=1
+		if self.rank==Piece.SPY: mask[Piece.MARSHALL]=1
 		return mask
 	
 	def getDefendWinMask(self):
 		mask=np.zeros((12,),dtype=int)
-		mask[:self.pid]=1
+		mask[:self.rank]=1
 		return mask
 		
 	@property
@@ -94,37 +87,51 @@ class ProbBoard(Board):
 	
 	
 	def addProbabilities(self):
-		pieces=[piece for piece in self.pieces if piece.player != self.knownPlayer]
-		counts=np.array(self.PIECE_COUNTS)
-		pieceMtx=np.array([piece.possibleIds for piece in pieces],dtype=float)
-		probabilities=np.zeros((len(pieces),12))
-		for i in range(len(pieces)):
-			if np.count_nonzero(pieceMtx[i])==1:
-				pieceId=np.where(pieceMtx[i]!=0)[0][0]
-				probabilities[i,pieceId]=1
+		# Number of hidden pieces per rank
+		hiddenCounts=np.array(Board.RANK_COUNTS)
+		pieceMtx=np.array([piece.possibleIds for piece in self.pieces],dtype=float)
+		probabilities=np.zeros((len(self.pieces),12))
+		
+		# Exclude pieces
+		for i,piece in enumerate(self.pieces):
+			# If this is current player, exclude from calculations
+			if piece.player==self.knownPlayer:
+				probabilities[i,piece.rank]=1
 				pieceMtx[i]=0
-				counts[pieceId]-=1
-		for i in range(len(counts)):
-			if counts[i]==0:
-				pieceMtx[:,i]=0
-		nonzeroRows=np.where(pieceMtx.sum(1)>0)[0]
-		pieceMtx=pieceMtx[nonzeroRows]
+			# Enemy piece is known if it has only one possible id (i.e. piece.possibleIds is 1-hot)
+			# In this case, subtract
+			elif np.count_nonzero(pieceMtx[i])==1:
+				# Find index where possibleIds==1
+				rank=np.where(pieceMtx[i]!=0)[0][0]
+				# Set probability to 1
+				probabilities[i,rank]=1.0
+				pieceMtx[i]=0 # Exclude from further calculations
+				hiddenCounts[rank]-=1 # Mark that rank as found for further calcaulations
+				
+		# For every rank which is completely found, remove that rank as a possiblility for hidden pieces
+		for rank in range(len(hiddenCounts)):
+			if hiddenCounts[rank]==0:
+				pieceMtx[:,rank]=0
+	
+
+		# Calcualte probability of hidden rows only			
+		hiddenRows=np.where(pieceMtx.sum(1)>0)[0]
+		
+		pieceMtx=pieceMtx[hiddenRows]
 		pieceMtx/=pieceMtx.sum(1,keepdims=True)
 		pieceMtx/=pieceMtx.sum(0,keepdims=True)
 		pieceMtx/=pieceMtx.sum(1,keepdims=True)
-		probabilities[nonzeroRows]=pieceMtx
-		for i in range(len(pieces)):
-			pieces[i].probs=probabilities[i]
+		probabilities[hiddenRows]=pieceMtx
+		
+		for i,piece in enumerate(self.pieces):
+			piece.probs=probabilities[i]
 		self.probabilities=probabilities
 	
 	def applyMoveProb(self,fromX,fromY,toX,toY,knownPlayer):
-		move=np.array([[fromX,fromY],[toX,toY]])
+		move=((fromX,fromY),(toX,toY))
 		return self.applyMoveProbabilistic(move,knownPlayer)
 	
 	def applyMoveProbabilistic(self,move,knownPlayer):
-		if not self.hasProbabilities:
-			self.addProbabilities(knownPlayer)
-			
 		fromPos,toPos=move
 		fromId = self.grid[fromPos]
 		toId = self.grid[toPos]
@@ -160,7 +167,7 @@ class ProbBoard(Board):
 			loseProb = (loseMask*toPiece.probs).sum()
 			
 			if winProb>0:
-				newBoard = ProbBoard(self)
+				newBoard = ProbBoard(self,self.knownPlayer)
 				fromPieceNew = newBoard[fromPos]
 				toPieceNew = newBoard[toPos]
 
@@ -174,7 +181,7 @@ class ProbBoard(Board):
 				boards.append((newBoard,winProb))
 				
 			if tieProb>0:
-				newBoard = ProbBoard(self)
+				newBoard = ProbBoard(self,self.knownPlayer)
 				fromPieceNew = newBoard[fromPos]
 				toPieceNew = newBoard[toPos]
 
@@ -188,7 +195,7 @@ class ProbBoard(Board):
 				boards.append((newBoard,tieProb))
 				
 			if loseProb>0:
-				newBoard = ProbBoard(self)
+				newBoard = ProbBoard(self,self.knownPlayer)
 				fromPieceNew = newBoard[fromPos]
 				toPieceNew = newBoard[toPos]
 
@@ -203,6 +210,7 @@ class ProbBoard(Board):
 		# Opponent attacks
 		else:
 			# Attacker lose = defender win
+			toPiece=self[toPos]
 			loseMask = toPiece.getDefendWinMask()
 			winMask = 1-loseMask
 			winMask[toPiece.rank] = 0
@@ -216,7 +224,7 @@ class ProbBoard(Board):
 			loseProb = (loseMask*fromPiece.probs).sum()
 			
 			if winProb>0:
-				newBoard = ProbBoard(self)
+				newBoard = ProbBoard(self,self.knownPlayer)
 				fromPieceNew = newBoard[fromPos]
 				toPieceNew = newBoard[toPos]
 
@@ -231,7 +239,7 @@ class ProbBoard(Board):
 				boards.append((newBoard,winProb))
 				
 			if tieProb>0:
-				newBoard = ProbBoard(self)
+				newBoard = ProbBoard(self,self.knownPlayer)
 				fromPieceNew = newBoard[fromPos]
 				toPieceNew = newBoard[toPos]
 
@@ -246,7 +254,7 @@ class ProbBoard(Board):
 				boards.append((newBoard,tieProb))
 				
 			if loseProb>0:
-				newBoard = ProbBoard(self)
+				newBoard = ProbBoard(self,self.knownPlayer)
 				fromPieceNew = newBoard[fromPos]
 				toPieceNew = newBoard[toPos]
 
@@ -344,3 +352,16 @@ class ProbBoard(Board):
 		return points
 		
 
+def makeBoard():
+	board=Board()
+	board.placeRandom()
+	moves=board.getValidMoves(1)
+	board.applyMove(moves[0])
+	moves=board.getValidMoves(1)
+	board.applyMove(moves[2])
+	return board
+
+#board2=makeBoard()
+board=ProbBoard(board2,1)
+print(board.heuristic())
+a10=board.applyMoveProb(0,4,0,3,1)
