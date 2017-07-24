@@ -7,6 +7,12 @@ Created on Sat Jul 22 22:50:32 2017
 from board import Piece, Board
 import numpy as np
 
+DEBUG_MODE=True
+
+def log(*a):
+	if DEBUG_MODE:
+		print(a)
+
 class ProbPiece(Piece):
 	def __init__(self,piece, isKnown=False):
 		self.id=piece.id
@@ -120,6 +126,7 @@ class ProbBoard(Board):
 		pieceMtx=pieceMtx[hiddenRows]
 		pieceMtx/=pieceMtx.sum(1,keepdims=True)
 		pieceMtx/=pieceMtx.sum(0,keepdims=True)
+		pieceMtx*=hiddenCounts
 		pieceMtx/=pieceMtx.sum(1,keepdims=True)
 		probabilities[hiddenRows]=pieceMtx
 		
@@ -267,11 +274,18 @@ class ProbBoard(Board):
 				fromPiece.possibleIds*=loseMask
 				boards.append((newBoard,loseProb))
 		
+		#Update probabilities
+		for board,prob in boards:
+			board.addProbabilities()
 		return boards
 
 
 	def capturedBonus(self, piecesLeft, piecesLeftOpp):
 		points=0
+		
+		# Deduct points for flag capture		
+		flagCapturedsProb=1.0-piecesLeft[Piece.FLAG]
+		points -= 40*flagCapturedsProb
 		
 		# Deduct points for no miners left
 		noMinersProb=max(0,1.0-piecesLeft[Piece.MINER])
@@ -288,6 +302,8 @@ class ProbBoard(Board):
 		# Points for invincible general
 		invincibleGeneral = piecesLeft[Piece.GENERAL]*oppCapturedProb[Piece.MARSHALL]*oppCapturedProb[Piece.GENERAL]
 		points += 16*invincibleGeneral
+		
+		log(flagCapturedsProb, noMinersProb, marshallNoSpy, invincibleMarshall, invincibleGeneral, points)
 		return points
 	
 			
@@ -321,9 +337,17 @@ class ProbBoard(Board):
 				value = -value
 			multipliers[i]=value
 		
-		pieceValues=np.array(Board.RANK_VALUES).reshape((-1,1))
-		pointsPerPiece=np.matmul(self.probabilities,pieceValues)*multipliers
+		pieceValues = np.array(Board.RANK_VALUES).reshape((-1,1))
+		pointsPerPiece = np.matmul(self.probabilities,pieceValues).flatten()
+		pointsPerPiece *= multipliers
 		points=pointsPerPiece.sum()
+		
+		log(pointsPerPiece)
+		log(multipliers.flatten())
+		log(np.matmul(self.probabilities,pieceValues).flatten())
+		log(playerPiecesLeft)
+		log(opponentPiecesLeft)
+		log(points)
 		
 		points += self.capturedBonus(playerPiecesLeft, opponentPiecesLeft)
 		points -= self.capturedBonus(opponentPiecesLeft, playerPiecesLeft)
