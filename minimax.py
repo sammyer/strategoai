@@ -5,7 +5,7 @@ Created on Mon Jul 24 21:51:31 2017
 @author: sam
 """
 
-from board import Board
+from board import Board, Move
 from ai import ProbBoard
 
 
@@ -25,6 +25,6 @@ def makeBoard():
 #board2=makeBoard()
 board=ProbBoard(board2,1)
 print(board.heuristic())
-a10=board.applyMoveProb(0,4,0,3)
+a10=board.applyMoveProbabilistic(Move(0,4,0,3))
 a11=board.getValidMoves(1)
 a12=[board.applyMoveProbabilistic(i) for i in a11]

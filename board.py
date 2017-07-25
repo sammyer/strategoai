@@ -54,7 +54,33 @@ class Piece:
 	def isScout(self):
 		return self.rank==self.SCOUT
 	
+	def __repr__(self):
+		return "%d:%d"%(self.player,self.rank)
+
+class Move:
+	def __init__(self,fromX,fromY,toX,toY):
+		self.fromX=fromX
+		self.fromY=fromY
+		self.toX=toX
+		self.toY=toY
 	
+	@classmethod
+	def create(cls, fromPos, toPos):
+		return cls(fromPos[0],fromPos[1],toPos[0],toPos[1])	
+	
+	@property
+	def fromPos(self):
+		return (self.fromX, self.fromY)
+	
+	@property
+	def toPos(self):
+		return (self.toX, self.toY)
+	
+	def dist(self):
+		return (self.toPos[0]-self.fromPos[0],self.toPos[1]-self.fromPos[1])
+	
+	def __repr__(self):
+		return "(%d,%d)-(%d,%d)"%(self.fromX,self.fromY,self.toX,self.toY)
 
 class Board:
 	RANK_COUNTS=[1,1,8,5,4,4,4,3,2,1,1,6]
@@ -92,29 +118,28 @@ class Board:
 		return np.min(pos)>=0 and np.max(pos)<10
 	
 	def isValidMove(self,move):
-		fromPos,toPos=tuple(move[0]),tuple(move[1])
-		if not self.isValidPos(fromPos) or not self.isValidPos(toPos):
+		if not self.isValidPos(move.fromPos) or not self.isValidPos(move.toPos):
 			return False
 		
-		if self.grid[fromPos]<0:
+		if self.grid[move.fromPos]<0:
 			return False
-		if self.grid[toPos]==self.LAKE:
+		if self.grid[move.toPos]==self.LAKE:
 			return False
-		fromPiece=self[fromPos]
-		toPiece=self[toPos]
+		fromPiece=self[move.fromPos]
+		toPiece=self[move.toPos]
 		if not fromPiece.moveable:
 			return False
 			
 		if toPiece!=None and toPiece.player==fromPiece.player:
 			return False
 			
-		dist=np.array(toPos)-np.array(fromPos)
+		dist=move.dist()
 		if np.count_nonzero(dist)!=1:
 			return False
 		if fromPiece.isScout():
 			direction=np.sign(dist)
-			pos=fromPos+direction
-			while np.any(pos!=toPos):
+			pos=move.fromPos+direction
+			while np.any(pos!=move.toPos):
 				if not self.grid[tuple(pos)]==Board.EMPTY:
 					return False
 				pos+=direction
@@ -149,28 +174,26 @@ class Board:
 					for i in range(10):
 						toPos=fromPos.copy()
 						toPos[0]=i
-						move=(tuple(fromPos),tuple(toPos))
+						move=Move.create(fromPos,toPos)
 						if self.isValidMove(move):
 							moves.append(move)
 						toPos=fromPos.copy()
 						toPos[1]=i
-						move=(tuple(fromPos),tuple(toPos))
+						move=Move.create(fromPos,toPos)
 						if self.isValidMove(move):
 							moves.append(move)
 				else:
 					for direction in directions:
 						toPos=fromPos+direction
-						move=(tuple(fromPos),tuple(toPos))
+						move=Move.create(fromPos,toPos)
 						if self.isValidMove(move):
 							moves.append(move)
 		return moves
 
-	def applyMove2(self,fromX,fromY,toX,toY):
-		move=np.array([[fromX,fromY],[toX,toY]])
-		self.applyMove(move)
-
 	def applyMove(self,move):
-		fromPos,toPos=tuple(move[0]),tuple(move[1])
+		fromPos=move.fromPos
+		toPos=move.toPos
+		
 		fromPiece=self[fromPos]
 		fromPiece.moved=True
 		if self.grid[toPos] == self.EMPTY:

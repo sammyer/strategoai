@@ -135,12 +135,10 @@ class ProbBoard(Board):
 			piece.probs=probabilities[i]
 		self.probabilities=probabilities
 	
-	def applyMoveProb(self,fromX,fromY,toX,toY):
-		move=((fromX,fromY),(toX,toY))
-		return self.applyMoveProbabilistic(move)
-	
 	def applyMoveProbabilistic(self,move):
-		fromPos,toPos=tuple(move[0]),tuple(move[1])
+		fromPos=move.fromPos
+		toPos=move.toPos
+		
 		fromId = self.grid[fromPos]
 		toId = self.grid[toPos]
 		fromPiece=self[fromPos]
