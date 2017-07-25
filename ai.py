@@ -7,7 +7,7 @@ Created on Sat Jul 22 22:50:32 2017
 from board import Piece, Board
 import numpy as np
 
-DEBUG_MODE=True
+DEBUG_MODE=False
 
 def log(*a):
 	if DEBUG_MODE:
