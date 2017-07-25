@@ -115,7 +115,7 @@ class Board:
 			direction=np.sign(dist)
 			pos=fromPos+direction
 			while np.any(pos!=toPos):
-				if not self[pos] is None:
+				if not self.grid[tuple(pos)]==Board.EMPTY:
 					return False
 				pos+=direction
 		else:
@@ -174,7 +174,7 @@ class Board:
 		fromPiece=self[fromPos]
 		fromPiece.moved=True
 		if self.grid[toPos] == self.EMPTY:
-			if np.max(toPos[0]-fromPos[0], toPos[1]-fromPos[1])>1:
+			if max(toPos[0]-fromPos[0], toPos[1]-fromPos[1])>1:
 				# Now we know it's a scout
 				fromPiece.seen=True
 			self.grid[fromPos]=self.EMPTY # from pos is now empty

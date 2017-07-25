@@ -55,7 +55,8 @@ class ProbPiece(Piece):
 	@property
 	def moveable(self):
 		mask=np.ones((12,),dtype=int)
-		mask[(Piece.BOMB, Piece.FLAG)]=0
+		mask[Piece.BOMB]=0
+		mask[Piece.FLAG]=0
 		return (self.possibleIds*mask).sum()>0
 	
 	def isScout(self):
@@ -134,12 +135,12 @@ class ProbBoard(Board):
 			piece.probs=probabilities[i]
 		self.probabilities=probabilities
 	
-	def applyMoveProb(self,fromX,fromY,toX,toY,knownPlayer):
+	def applyMoveProb(self,fromX,fromY,toX,toY):
 		move=((fromX,fromY),(toX,toY))
-		return self.applyMoveProbabilistic(move,knownPlayer)
+		return self.applyMoveProbabilistic(move)
 	
-	def applyMoveProbabilistic(self,move,knownPlayer):
-		fromPos,toPos=move
+	def applyMoveProbabilistic(self,move):
+		fromPos,toPos=tuple(move[0]),tuple(move[1])
 		fromId = self.grid[fromPos]
 		toId = self.grid[toPos]
 		fromPiece=self[fromPos]
@@ -151,8 +152,7 @@ class ProbBoard(Board):
 			newBoard=ProbBoard(self,self.knownPlayer)
 			fromPieceNew=newBoard[fromPos]
 			fromPieceNew.setMoved()
-			fromPieceNew.setSeen()
-			if np.max(toPos-fromPos)>1:
+			if max(toPos[0]-fromPos[0], toPos[1]-fromPos[1])>1:
 				# Now we know it's a scout
 				fromPieceNew.setRank(Piece.SCOUT)
 			newBoard.grid[fromPos]=Board.EMPTY # from pos is now empty
@@ -160,7 +160,7 @@ class ProbBoard(Board):
 			boards.append((newBoard,1.0))
 
 		# Player attacks
-		elif player == knownPlayer:
+		elif player == self.knownPlayer:
 			toPiece=self[toPos]
 			
 			winMask = fromPiece.getAttackWinMask()
@@ -375,17 +375,3 @@ class ProbBoard(Board):
 					
 		return points
 		
-
-def makeBoard():
-	board=Board()
-	board.placeRandom()
-	moves=board.getValidMoves(1)
-	board.applyMove(moves[0])
-	moves=board.getValidMoves(1)
-	board.applyMove(moves[2])
-	return board
-
-#board2=makeBoard()
-board=ProbBoard(board2,1)
-print(board.heuristic())
-a10=board.applyMoveProb(0,4,0,3,1)
