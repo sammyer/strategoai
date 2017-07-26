@@ -105,13 +105,35 @@ class Board:
 		self.grid[[2,3,6,7],4:6]=self.LAKE
 		
 	
+	def placePlayerRandom(self,pieces,rows):
+		bombs=[]
+		for piece in pieces:
+			if piece.rank==Piece.FLAG:
+				flag=piece
+			elif piece.rank==Piece.BOMB:
+				bombs.append(piece)
+		
+		#Place flag at back surrounded by bombs
+		flagX=np.random.randint(10)
+		self.grid[flagX,rows[0]]=flag.id
+		pieces.remove(flag)
+		bombPositions=[(flagX-1,rows[0]),(flagX+1,rows[0]),(flagX,rows[1])]
+		for bombPos in bombPositions:
+			if bombPos[0]>=0 and bombPos[0]<10:
+				bomb=bombs.pop()
+				pieces.remove(bomb)
+				self.grid[bombPos]=bomb.id
+		
+		np.random.shuffle(pieces)		
+		
+		for y in rows:
+			for x in range(10):
+				if self.grid[x,y]==Board.EMPTY:
+					self.grid[x,y]=pieces.pop().id
+	
 	def placeRandom(self):
-		playerPieces=[[piece for piece in self.pieces if piece.player==player] for player in (1,2)]
-		playerPieces=[np.random.permutation(pieces) for pieces in playerPieces]
-		for y in range(4):
-			for x in range(10):				
-				self.grid[x,6+y]=playerPieces[0][y*10+x].id
-				self.grid[x,3-y]=playerPieces[1][y*10+x].id
+		self.placePlayerRandom([piece for piece in self.pieces if piece.player==1],(9,8,7,6))
+		self.placePlayerRandom([piece for piece in self.pieces if piece.player==2],(0,1,2,3))
 
 		
 	def isValidPos(self,pos):
