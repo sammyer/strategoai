@@ -126,7 +126,7 @@ class ProbBoard(Board):
 		
 		pieceMtx=pieceMtx[hiddenRows]
 		pieceMtx/=pieceMtx.sum(1,keepdims=True)
-		pieceMtx/=pieceMtx.sum(0,keepdims=True)
+		pieceMtx/=np.maximum(pieceMtx.sum(0,keepdims=True),1e-7)
 		pieceMtx*=hiddenCounts
 		pieceMtx/=pieceMtx.sum(1,keepdims=True)
 		probabilities[hiddenRows]=pieceMtx
