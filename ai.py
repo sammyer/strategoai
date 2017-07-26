@@ -221,8 +221,9 @@ class ProbBoard(Board):
 			winMask[toPiece.rank] = 0
 			tieMask=0*winMask
 			tieMask[toPiece.rank] = 1
-			winMask[(Piece.BOMB, Piece.FLAG)]=0
-			loseMask[(Piece.BOMB, Piece.FLAG)]=0
+			for rank in (Piece.BOMB, Piece.FLAG):
+				winMask[rank]=0
+				loseMask[rank]=0
 			
 			winProb = (winMask*fromPiece.probs).sum()
 			tieProb = fromPiece.probs[toPiece.rank]
