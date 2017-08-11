@@ -94,48 +94,139 @@ class ProbBoard(Board):
 	
 	
 	def addProbabilities(self):
-		# Number of hidden pieces per rank
-		hiddenCounts=np.array(Board.RANK_COUNTS)
-		pieceMtx=np.array([piece.possibleIds for piece in self.pieces],dtype=float)
-		probabilities=np.zeros((len(self.pieces),12))
+		for player in Board.PLAYERS:
+			# Number of hidden pieces per rank
+			hiddenCounts=np.array(Board.RANK_COUNTS)
+			pieces=[piece for piece in self.pieces if piece.player==player]
+			pieceMtx=np.array([piece.possibleIds for piece in pieces],dtype=float)
+			probabilities=np.zeros((len(pieces),12))
+			
+			# Exclude pieces
+			for i,piece in enumerate(self.pieces):
+				# Enemy piece is known if it has only one possible id (i.e. piece.possibleIds is 1-hot)
+				# In this case, subtract
+				if np.count_nonzero(pieceMtx[i])==1:
+					# Find index where possibleIds==1
+					rank=np.where(pieceMtx[i]!=0)[0][0]
+					# Set probability to 1
+					probabilities[i,rank]=1.0
+					pieceMtx[i]=0 # Exclude from further calculations
+					hiddenCounts[rank]-=1 # Mark that rank as found for further calcaulations
+					
+			# For every rank which is completely found, remove that rank as a possiblility for hidden pieces
+			for rank in range(len(hiddenCounts)):
+				if hiddenCounts[rank]==0:
+					pieceMtx[:,rank]=0
 		
-		# Exclude pieces
-		for i,piece in enumerate(self.pieces):
-			# If this is current player, exclude from calculations
-			if piece.player==self.knownPlayer:
-				probabilities[i,piece.rank]=1
-				pieceMtx[i]=0
-			# Enemy piece is known if it has only one possible id (i.e. piece.possibleIds is 1-hot)
-			# In this case, subtract
-			elif np.count_nonzero(pieceMtx[i])==1:
-				# Find index where possibleIds==1
-				rank=np.where(pieceMtx[i]!=0)[0][0]
-				# Set probability to 1
-				probabilities[i,rank]=1.0
-				pieceMtx[i]=0 # Exclude from further calculations
-				hiddenCounts[rank]-=1 # Mark that rank as found for further calcaulations
-				
-		# For every rank which is completely found, remove that rank as a possiblility for hidden pieces
-		for rank in range(len(hiddenCounts)):
-			if hiddenCounts[rank]==0:
-				pieceMtx[:,rank]=0
 	
+			# Calcualte probability of hidden rows only			
+			hiddenRows=np.where(pieceMtx.sum(1)>0)[0]
+			
+			pieceMtx=pieceMtx[hiddenRows]
+			pieceMtx/=pieceMtx.sum(1,keepdims=True)
+			pieceMtx/=np.maximum(pieceMtx.sum(0,keepdims=True),1e-7)
+			pieceMtx*=hiddenCounts
+			pieceMtx/=pieceMtx.sum(1,keepdims=True)
+			probabilities[hiddenRows]=pieceMtx
+			
+			for i,piece in enumerate(pieces):
+				piece.probs=probabilities[i]
+			
+		self.probabilities=np.array([piece.probs for piece in self.pieces])
 
-		# Calcualte probability of hidden rows only			
-		hiddenRows=np.where(pieceMtx.sum(1)>0)[0]
+	def getDefenderProbs(self,defenderPos,attackerRank):
+		mask=np.zeros((12,),dtype=int)
+		mask[:attackerRank]=1
+		if attackerRank==Piece.MINER: mask[Piece.BOMB]=1
+		if attackerRank==Piece.SPY: mask[Piece.MARSHALL]=1
+
+		defender = self[defenderPos]
+		assert(not defender is None)
 		
-		pieceMtx=pieceMtx[hiddenRows]
-		pieceMtx/=pieceMtx.sum(1,keepdims=True)
-		pieceMtx/=np.maximum(pieceMtx.sum(0,keepdims=True),1e-7)
-		pieceMtx*=hiddenCounts
-		pieceMtx/=pieceMtx.sum(1,keepdims=True)
-		probabilities[hiddenRows]=pieceMtx
+		winProb = (mask*defender.probs).sum()
+		tieProb = defender.probs[attackerRank]
+		loseProb = 1.0-winProb-tieProb
 		
-		for i,piece in enumerate(self.pieces):
-			piece.probs=probabilities[i]
-		self.probabilities=probabilities
+		return np.array([winProb,tieProb,loseProb]),mask
 	
+	def getAttackerProbs(self,attackerPos,defenderRank):
+		mask=np.zeros((12,),dtype=int)
+		mask[defenderRank+1:]=1
+		if defenderRank==Piece.BOMB: mask[Piece.MINER]=1
+		if defenderRank==Piece.MARSHALL: mask[Piece.SPY]=1
+		mask[Piece.BOMB]=0
+		
+		attacker = self[attackerPos]
+		assert(not attacker is None)
+		
+		winProb = (mask*attacker.probs).sum()
+		tieProb = attacker.probs[defenderRank]
+		immovableProb = attacker.probs[Piece.BOMB] + attacker.probs[Piece.FLAG]
+		loseProb = 1.0-winProb-tieProb-immovableProb
+		
+		return np.array([winProb,tieProb,loseProb,immovableProb]),mask
+
+	def getDefenderProbsDoubleBlind(self,defenderPos,attacker):
+		# Split defender, but probabilistic
+		
+		probs = np.zeros((3,))
+		for rank,rankProb in enumerate(attacker.probs):
+			if rankProb>0:
+				defenderProbs,mask = self.getDefenderProbs(defenderPos,rank) 
+				probs+=rankProb*defenderProbs
+				
+		return probs
+	
+	def splitBoard(self,piecePos,rankMask):
+		# Creates a new board where a single pieces rank is masked by rankMask
+		# rankMask can either be a vector mask, or just a single integer which gets changed into a 1-hot mask
+		if type(rankMask)==int:
+			rank=rankMask
+			rankMask=np.zeros((12,),dtype=int)
+			rankMask[rank]=1
+			
+		newBoard=ProbBoard(self,self.knownPlayer)
+		piece=newBoard[piecePos]
+		
+		piece.possibleIds*=rankMask
+		return newBoard
+
+	def applyWin(self,fromPos,toPos):
+		#fromPiece.setMoved()
+		self[fromPos].setSeen()
+		self[toPos].setCaptured()
+
+		self.grid[toPos]=self.grid[fromPos]
+		self.grid[fromPos]=Board.EMPTY
+		
+
+	def applyTie(self,fromPos,toPos):
+		self[fromPos].setCaptured()
+		self[toPos].setCaptured()
+		
+		self.grid[fromPos]=Board.EMPTY
+		self.grid[toPos]=Board.EMPTY
+
+	def applyLoss(self,fromPos,toPos):
+		self[fromPos].setCaptured()
+		self[toPos].setSeen()
+		
+		self.grid[fromPos]=Board.EMPTY
+		
+
+				
 	def applyMoveProbabilistic(self,move):
+		"""
+		Note : for attacks there are 7 possible situations
+		1. Player attacks, opponent known (complete information)
+		2. Player attacks, opponent unknown
+		3. Player attacks in the future, opponent unkonwn now, but will be known at time of attack
+		4. Opponent attacks, complete information (all pieces known to all parties)
+		5. Opponent attacks with information advantage (we dont know opponent, but it knows us)
+		6. Opponent attacks with information disadvantage (we know opponent, but it doesn't know us)
+		7. Opponent attacks, double blind
+		"""
+		
 		fromPos=move.fromPos
 		toPos=move.toPos
 		

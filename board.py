@@ -85,6 +85,7 @@ class Move:
 class Board:
 	RANK_COUNTS=[1,1,8,5,4,4,4,3,2,1,1,6]
 	RANK_VALUES=np.array([0,2,3,6,4,5,6,7,9,12,15,8])
+	PLAYERS=[1,2]
 	EMPTY=-1
 	LAKE=-2
 
