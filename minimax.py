@@ -16,6 +16,9 @@ class BoardNode:
 		self.heuristic=self.localHeuristic
 		self.children=None #moves
 	
+	def expandNode(self, player):
+		self.searchMoves(player,1)
+	
 	def searchMoves(self, player, depth=1):
 		moves=self.board.getValidMoves(player)
 		self.children = [self.makeMoveNode(move) for move in moves]
@@ -48,8 +51,66 @@ class MoveNode:
 	
 	def __getitem__(self,pos):
 		return self.children[pos]
-		
-		
+
+
+
+def expandNode(board,player):
+	moves=board.getValidMoves(player)
+	for move in moves:
+		move.isAttack = board.grid[move.toPos] != Board.EMPTY
+	attackingMoves=[move for move in moves if move.isAttack]
+	if player==board.knownPlayer:
+		for move in attackingMoves:
+			if board[move.toPos].isSeen:
+				# strightforward
+				preSplits.append(move)
+			else:
+				postSplits.append(move)
+	else:
+		for move in attackingMoves:
+			if board[move.fromPos].isSeen:
+				if board[move.toPos].isSeen:
+					pass
+				else:
+					postSplits.append(move)
+			else:
+				if board[move.toPos].isSeen:
+					preSplits.append(move)
+				else:
+					double.append(move)
+				
+
+"""
+01 function alphabeta(node, depth, α, β, maximizingPlayer)
+02      if depth = 0 or node is a terminal node
+03          return the heuristic value of node
+04      if maximizingPlayer
+05          v := -∞
+06          for each child of node
+07              v := max(v, alphabeta(child, depth – 1, α, β, FALSE))
+08              α := max(α, v)
+09              if β ≤ α
+10                  break (* β cut-off *)
+11          return v
+12      else
+13          v := +∞
+14          for each child of node
+15              v := min(v, alphabeta(child, depth – 1, α, β, TRUE))
+16              β := min(β, v)
+17              if β ≤ α
+18                  break (* α cut-off *)
+19          return v
+"""
+
+def searchTreeAux(node,depth,alpha,beta, maximizingPlayer):
+	node.expandNode()
+
+def searchTree(board,depth,player=1):
+	# Note: player here denotes the player whose perspecitve it is for hidden pieces
+	# This is not necesarrily whose player is making the move
+	root=BoardNode(ProbBoard(board,player))
+	searchTreeAux(root,depth,-np.inf,np.inf, True)
+
 
 def makeBoardTree(board, player=1):
 	return BoardNode(ProbBoard(board,player))
