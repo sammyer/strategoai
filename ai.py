@@ -134,6 +134,94 @@ class ProbBoard(Board):
 			
 		self.probabilities=np.array([piece.probs for piece in self.pieces])
 
+
+	WIN=1
+	TIE=0
+	LOSS=-1
+	IMMOVABLE=-2
+
+	def getDefenderMask(self,attackerRank):
+		# row  1=win, 0=tie, -1=lose
+		mask=np.full(12, self.LOSS, dtype=int)
+		mask[:attackerRank] = self.WIN
+		if attackerRank==Piece.MINER: mask[Piece.BOMB] = self.WIN
+		if attackerRank==Piece.SPY: mask[Piece.MARSHALL] = self.WIN
+		mask[attackerRank] = self.TIE
+		return mask
+	
+	def getAttackerMask(self,defenderRank):
+		# row  1=win, 0=tie, -1=lose, -2=immovable
+		mask=np.full(12, self.LOSS, dtype=int)
+		mask[0,defenderRank+1:] = self.WIN
+		if defenderRank==Piece.BOMB: mask[Piece.MINER] = self.WIN
+		if defenderRank==Piece.MARSHALL: mask[Piece.SPY] = self.WIN
+		mask[defenderRank] = self.TIE
+
+		mask[Piece.BOMB] = self.IMMOVABLE
+		mask[Piece.FLAG] = self.IMMOVABLE
+		return mask
+	
+	def splitOnDefender(self,defenderPos,attackerRank):
+		rankOutcomes = self.getDefenderMask(attackerRank)
+		defender = self[defenderPos]
+		assert(not defender is None)
+		
+		boards=[]
+		for outcome in (self.WIN, self.TIE, self.LOSS):
+			mask = rankOutcomes==outcome
+			prob=np.dot(mask, defender.probs)
+			if prob==0:
+				board = None
+			else:
+				board = self.maskBoard(defenderPos,mask)
+			boards.append((outcome,prob,board))
+		return boards
+	
+	def splitOnAttacker(self,attackerPos,defenderRank):
+		rankOutcomes = self.getAttackerMask(defenderRank)
+		attacker = self[attackerPos]
+		assert(not attacker is None)
+		
+		boards=[]
+		for outcome in (self.WIN, self.TIE, self.LOSS, self.IMMOVABLE):
+			mask = rankOutcomes==outcome
+			prob=np.dot(mask, attacker.probs)
+			if prob==0:
+				board = None
+			else:
+				board = self.maskBoard(attackerPos,mask)
+			boards.append((outcome,prob,board))
+		return boards
+	
+	def splitOnDefenderDoubleBlind(self,defenderPos,attackerPos):
+		attacker = self[attackerPos]
+		defender = self[defenderPos]
+		assert(not attacker is None)
+		assert(not defender is None)
+
+		# Matrix of size (outcomes, ranks)
+		outcomes=[self.WIN, self.TIE, self.LOSS]
+		rankOutcomeProbs = np.zeros((3,12))
+		
+		for rank,rankProb in enumerate(attacker.probs):
+			if rankProb>0:
+				mask = self.getDefenderMask(rank)
+				for idx,outcome in eunmerate(outcomes):
+					rankOutcomeProbs[idx] += (mask==outcome)*rankProb
+				
+		outcomeProbs = (rankOutcomeProbs*defender.probs).sum(1)
+		
+		boards=[]
+		for outcome,prob in zip(outcomes,outcomeProbs):
+			if prob==0:
+				board = None
+			else:
+				board = self.maskBoard(defenderPos,mask)
+			boards.append((outcome,prob,board))
+		return boards
+	
+	
+"""
 	def getDefenderProbs(self,defenderPos,attackerRank):
 		mask=np.zeros((12,),dtype=int)
 		mask[:attackerRank]=1
@@ -176,8 +264,9 @@ class ProbBoard(Board):
 				probs+=rankProb*defenderProbs
 				
 		return probs
+"""
 	
-	def splitBoard(self,piecePos,rankMask):
+	def maskBoard(self,piecePos,rankMask):
 		# Creates a new board where a single pieces rank is masked by rankMask
 		# rankMask can either be a vector mask, or just a single integer which gets changed into a 1-hot mask
 		if type(rankMask)==int:
