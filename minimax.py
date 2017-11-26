@@ -54,31 +54,83 @@ class MoveNode:
 
 
 
-def expandNode(board,player):
+def getSplitMoves(board,player):
 	moves=board.getValidMoves(player)
 	for move in moves:
 		move.isAttack = board.grid[move.toPos] != Board.EMPTY
 	attackingMoves=[move for move in moves if move.isAttack]
+	preSplits=[]
+	postSplits=[]
+	doubles=[]
+	
 	if player==board.knownPlayer:
 		for move in attackingMoves:
-			if board[move.toPos].isSeen:
+			if board[move.toPos].seen:
 				# strightforward
 				preSplits.append(move)
 			else:
 				postSplits.append(move)
 	else:
 		for move in attackingMoves:
-			if board[move.fromPos].isSeen:
-				if board[move.toPos].isSeen:
+			if board[move.fromPos].seen:
+				if board[move.toPos].seen:
 					pass
 				else:
 					postSplits.append(move)
 			else:
-				if board[move.toPos].isSeen:
+				if board[move.toPos].seen:
 					preSplits.append(move)
 				else:
-					double.append(move)
-				
+					doubles.append(move)
+	splittingMoves=[]
+	for move in preSplits:
+		splittingMoves.append(("pre",move))
+	for move in postSplits:
+		splittingMoves.append(("post",move))
+	for move in doubles:
+		splittingMoves.append(("double",move))
+	return splittingMoves
+
+class Node:
+	def __init__(self, board, move=None, outcome=None, prob=1.0):
+		self.board = board
+		self.move = move
+		self.outcome = outcome
+		self.prob = prob
+		self.children=[]
+		self.value = 0
+		self.splitType = None
+	
+	def expandSplits(self,splitMoves,idx=0):
+		if idx == len(splitMoves):
+			return
+		splitType, move = splitMoves[idx]
+		self.splitType = splitType
+		
+		if splitType == "pre":
+			attackerPos = move.fromPos
+			defender = self.board[move.toPos]
+			if not defender.seen:
+				raise Exception("Error: pre split defender must be seen")
+			results = self.board.splitOnAttacker(attackerPos, defender.rank)
+		elif splitType == "post":
+			defenderPos = move.toPos
+			attacker = self.board[move.fromPos]
+			if not attacker.seen:
+				raise Exception("Error: post split attacker must be seen")
+			results = self.board.splitOnDefender(defenderPos, attacker.rank)
+		elif splitType == "double":
+			results = self.board.splitOnDefenderDoubleBlind(move.toPos, move.fromPos)
+			
+		for outcome,prob,board in results:
+			if outcome == ProbBoard.IMMOVABLE or (splitType=="pre" and outcome == ProbBoard.LOSE):
+				continue
+			child = Node(board, move, outcome, prob*self.prob)
+			child.expandSplits(splitMoves,idx+1)
+			child.parentSplitType = splitType
+			self.children.append(child)
+			
+		
 
 """
 01 function alphabeta(node, depth, α, β, maximizingPlayer)

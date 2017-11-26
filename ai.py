@@ -20,6 +20,7 @@ class ProbPiece(Piece):
 		self.captured=piece.captured
 		self.seen=piece.seen
 		self.char=piece.char
+		self.rank=None
 		if isKnown:
 			self.rank=piece.rank
 			
@@ -78,6 +79,8 @@ class ProbPiece(Piece):
 		self.seen=True
 		self.captured=True
 	
+	def __repr__(self):
+		return "[Piece player=%d seen=%b rank=%s captured=%b"%(self.player,self.seen,str(self.rank),self.captured)
 
 
 
@@ -97,12 +100,12 @@ class ProbBoard(Board):
 		for player in Board.PLAYERS:
 			# Number of hidden pieces per rank
 			hiddenCounts=np.array(Board.RANK_COUNTS)
-			pieces=[piece for piece in self.pieces if piece.player==player]
-			pieceMtx=np.array([piece.possibleIds for piece in pieces],dtype=float)
-			probabilities=np.zeros((len(pieces),12))
+			playerPieces=[piece for piece in self.pieces if piece.player==player]
+			pieceMtx=np.array([piece.possibleIds for piece in playerPieces],dtype=float)
+			probabilities=np.zeros((len(playerPieces),12))
 			
 			# Exclude pieces
-			for i,piece in enumerate(self.pieces):
+			for i,piece in enumerate(playerPieces):
 				# Enemy piece is known if it has only one possible id (i.e. piece.possibleIds is 1-hot)
 				# In this case, subtract
 				if np.count_nonzero(pieceMtx[i])==1:
@@ -129,7 +132,7 @@ class ProbBoard(Board):
 			pieceMtx/=pieceMtx.sum(1,keepdims=True)
 			probabilities[hiddenRows]=pieceMtx
 			
-			for i,piece in enumerate(pieces):
+			for i,piece in enumerate(playerPieces):
 				piece.probs=probabilities[i]
 			
 		self.probabilities=np.array([piece.probs for piece in self.pieces])
@@ -162,6 +165,20 @@ class ProbBoard(Board):
 		return mask
 	
 	def splitOnDefender(self,defenderPos,attackerRank):
+		""" For an attacking move where the attacker is known but the defender is unknown, 
+		creates boards for each possible outcome, with probablity of that outcome based on all known information.
+
+		The defender is unknown, meaning the attacker is taking a chance and does not know for sure the best decision.
+		As the AI, we know the same amount as the attacker, therefore we can calculate the expected value
+		This is "post-split", meaning we make a decision based on the expected value.
+		E(x)=sum(prob(y)*E(y)) for y in outcomes
+		
+		RETURNS:
+			an array of:
+			outcome - one of WIN,TIE,LOSS,IMMOVABLE
+			prob - probability of board configuration (all probs add to one)
+			board - new board
+		"""
 		rankOutcomes = self.getDefenderMask(attackerRank)
 		defender = self[defenderPos]
 		assert(not defender is None)
@@ -178,6 +195,16 @@ class ProbBoard(Board):
 		return boards
 	
 	def splitOnAttacker(self,attackerPos,defenderRank):
+		""" For an attacking move where the defender is known but the attacker is unknown, 
+		creates boards for each possible outcome, with probablity of that outcome
+		based on all known information
+		
+		The attacker is unknown to us, but the attacker knows who they are.
+		Therefore, the attacker has perfect information and will always make the best decision
+		However, as the AI we don't know what that decision is
+		This is "pre-split", meaning we have to consider every possibile outcome, calculated a different expected value
+		for each possibility, and take the max path based on the outcome.
+		"""
 		rankOutcomes = self.getAttackerMask(defenderRank)
 		attacker = self[attackerPos]
 		assert(not attacker is None)
@@ -194,6 +221,12 @@ class ProbBoard(Board):
 		return boards
 	
 	def splitOnDefenderDoubleBlind(self,defenderPos,attackerPos):
+		""" For an attacking move where neither defender or attacker are known, 
+		creates boards for each possible outcome, with probablity of that outcome
+		
+		This is also "post-split" because we take a shortcut here and calculate
+		an expected value for wins, ties, losses based on both the attacker and defender probs
+		"""
 		attacker = self[attackerPos]
 		defender = self[defenderPos]
 		assert(not attacker is None)
@@ -206,7 +239,7 @@ class ProbBoard(Board):
 		for rank,rankProb in enumerate(attacker.probs):
 			if rankProb>0:
 				mask = self.getDefenderMask(rank)
-				for idx,outcome in eunmerate(outcomes):
+				for idx,outcome in enumerate(outcomes):
 					rankOutcomeProbs[idx] += (mask==outcome)*rankProb
 				
 		outcomeProbs = (rankOutcomeProbs*defender.probs).sum(1)
@@ -220,51 +253,6 @@ class ProbBoard(Board):
 			boards.append((outcome,prob,board))
 		return boards
 	
-	
-"""
-	def getDefenderProbs(self,defenderPos,attackerRank):
-		mask=np.zeros((12,),dtype=int)
-		mask[:attackerRank]=1
-		if attackerRank==Piece.MINER: mask[Piece.BOMB]=1
-		if attackerRank==Piece.SPY: mask[Piece.MARSHALL]=1
-
-		defender = self[defenderPos]
-		assert(not defender is None)
-		
-		winProb = (mask*defender.probs).sum()
-		tieProb = defender.probs[attackerRank]
-		loseProb = 1.0-winProb-tieProb
-		
-		return np.array([winProb,tieProb,loseProb]),mask
-	
-	def getAttackerProbs(self,attackerPos,defenderRank):
-		mask=np.zeros((12,),dtype=int)
-		mask[defenderRank+1:]=1
-		if defenderRank==Piece.BOMB: mask[Piece.MINER]=1
-		if defenderRank==Piece.MARSHALL: mask[Piece.SPY]=1
-		mask[Piece.BOMB]=0
-		
-		attacker = self[attackerPos]
-		assert(not attacker is None)
-		
-		winProb = (mask*attacker.probs).sum()
-		tieProb = attacker.probs[defenderRank]
-		immovableProb = attacker.probs[Piece.BOMB] + attacker.probs[Piece.FLAG]
-		loseProb = 1.0-winProb-tieProb-immovableProb
-		
-		return np.array([winProb,tieProb,loseProb,immovableProb]),mask
-
-	def getDefenderProbsDoubleBlind(self,defenderPos,attacker):
-		# Split defender, but probabilistic
-		
-		probs = np.zeros((3,))
-		for rank,rankProb in enumerate(attacker.probs):
-			if rankProb>0:
-				defenderProbs,mask = self.getDefenderProbs(defenderPos,rank) 
-				probs+=rankProb*defenderProbs
-				
-		return probs
-"""
 	
 	def maskBoard(self,piecePos,rankMask):
 		# Creates a new board where a single pieces rank is masked by rankMask
