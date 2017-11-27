@@ -163,6 +163,17 @@ class ProbBoard(Board):
 		mask[Piece.BOMB] = self.IMMOVABLE
 		mask[Piece.FLAG] = self.IMMOVABLE
 		return mask
+
+	"""
+	Note : for attacks there are 7 possible situations
+	1. Player attacks, opponent known (complete information)
+	2. Player attacks, opponent unknown
+	3. Player attacks in the future, opponent unkonwn now, but will be known at time of attack
+	4. Opponent attacks, complete information (all pieces known to all parties)
+	5. Opponent attacks with information advantage (we dont know opponent, but it knows us)
+	6. Opponent attacks with information disadvantage (we know opponent, but it doesn't know us)
+	7. Opponent attacks, double blind
+	"""
 	
 	def splitOnDefender(self,defenderPos,attackerRank):
 		""" For an attacking move where the attacker is known but the defender is unknown, 
@@ -210,8 +221,12 @@ class ProbBoard(Board):
 		assert(not attacker is None)
 		
 		boards=[]
-		for outcome in (self.WIN, self.TIE, self.LOSS, self.IMMOVABLE):
-			mask = rankOutcomes==outcome
+		for outcome in (self.WIN, self.TIE, self.LOSS):
+			# Combine immovable and loss, since in either case, we won't be taking the move
+			if outcome == self.LOSS:
+				mask = (rankOutcomes==self.LOSS)|(rankOutcomes==self.IMMOVABLE)
+			else:
+				mask = rankOutcomes==outcome
 			prob=np.dot(mask, attacker.probs)
 			if prob==0:
 				board = None
@@ -268,6 +283,14 @@ class ProbBoard(Board):
 		piece.possibleIds*=rankMask
 		return newBoard
 
+	def applyMove(self,move,outcome):
+		if outcome==self.WIN:
+			self.applyWin(move.fromPos,move.toPos)
+		elif outcome==self.LOSS:
+			self.applyLoss(move.fromPos,move.toPos)
+		elif outcome==self.TIE:
+			self.applyTie(move.fromPos,move.toPos)
+
 	def applyWin(self,fromPos,toPos):
 		#fromPiece.setMoved()
 		self[fromPos].setSeen()
@@ -290,161 +313,6 @@ class ProbBoard(Board):
 		
 		self.grid[fromPos]=Board.EMPTY
 		
-
-				
-	def applyMoveProbabilistic(self,move):
-		"""
-		Note : for attacks there are 7 possible situations
-		1. Player attacks, opponent known (complete information)
-		2. Player attacks, opponent unknown
-		3. Player attacks in the future, opponent unkonwn now, but will be known at time of attack
-		4. Opponent attacks, complete information (all pieces known to all parties)
-		5. Opponent attacks with information advantage (we dont know opponent, but it knows us)
-		6. Opponent attacks with information disadvantage (we know opponent, but it doesn't know us)
-		7. Opponent attacks, double blind
-		"""
-		
-		fromPos=move.fromPos
-		toPos=move.toPos
-		
-		fromId = self.grid[fromPos]
-		toId = self.grid[toPos]
-		fromPiece=self[fromPos]
-		player=self.pieces[fromId].player
-	
-		# Handle case of moving without attacking
-		boards=[]
-		if toId<0:
-			newBoard=ProbBoard(self,self.knownPlayer)
-			fromPieceNew=newBoard[fromPos]
-			fromPieceNew.setMoved()
-			if max(toPos[0]-fromPos[0], toPos[1]-fromPos[1])>1:
-				# Now we know it's a scout
-				fromPieceNew.setRank(Piece.SCOUT)
-			newBoard.grid[fromPos]=Board.EMPTY # from pos is now empty
-			newBoard.grid[toPos]=fromPiece.id
-			boards.append((newBoard,1.0))
-
-		# Player attacks
-		elif player == self.knownPlayer:
-			toPiece=self[toPos]
-			
-			winMask = fromPiece.getAttackWinMask()
-			loseMask = 1-winMask
-			loseMask[fromPiece.rank] = 0
-			tieMask=0*winMask
-			tieMask[fromPiece.rank] = 1
-			
-			winProb = (winMask*toPiece.probs).sum()
-			tieProb = toPiece.probs[fromPiece.rank]
-			loseProb = (loseMask*toPiece.probs).sum()
-			
-			if winProb>0:
-				newBoard = ProbBoard(self,self.knownPlayer)
-				fromPieceNew = newBoard[fromPos]
-				toPieceNew = newBoard[toPos]
-
-				newBoard.grid[fromPos]=Board.EMPTY # from pos is now empty
-				newBoard.grid[toPos]=fromId
-				
-				fromPieceNew.setSeen()
-				toPieceNew.setCaptured()
-				toPieceNew.possibleIds*=winMask
-				
-				boards.append((newBoard,winProb))
-				
-			if tieProb>0:
-				newBoard = ProbBoard(self,self.knownPlayer)
-				fromPieceNew = newBoard[fromPos]
-				toPieceNew = newBoard[toPos]
-
-				newBoard.grid[fromPos]=Board.EMPTY 
-				newBoard.grid[toPos]=Board.EMPTY
-				
-				fromPieceNew.setCaptured()
-				toPieceNew.setCaptured()
-				toPieceNew.possibleIds*=tieMask
-				
-				boards.append((newBoard,tieProb))
-				
-			if loseProb>0:
-				newBoard = ProbBoard(self,self.knownPlayer)
-				fromPieceNew = newBoard[fromPos]
-				toPieceNew = newBoard[toPos]
-
-				newBoard.grid[fromPos]=Board.EMPTY
-				
-				fromPieceNew.setCaptured()
-				toPieceNew.setSeen()
-				toPieceNew.possibleIds*=loseMask
-				
-				boards.append((newBoard,loseProb))
-
-		# Opponent attacks
-		else:
-			# Attacker lose = defender win
-			toPiece=self[toPos]
-			loseMask = toPiece.getDefendWinMask()
-			winMask = 1-loseMask
-			winMask[toPiece.rank] = 0
-			tieMask=0*winMask
-			tieMask[toPiece.rank] = 1
-			for rank in (Piece.BOMB, Piece.FLAG):
-				winMask[rank]=0
-				loseMask[rank]=0
-			
-			winProb = (winMask*fromPiece.probs).sum()
-			tieProb = fromPiece.probs[toPiece.rank]
-			loseProb = (loseMask*fromPiece.probs).sum()
-			
-			if winProb>0:
-				newBoard = ProbBoard(self,self.knownPlayer)
-				fromPieceNew = newBoard[fromPos]
-				toPieceNew = newBoard[toPos]
-
-				newBoard.grid[fromPos]=Board.EMPTY
-				newBoard.grid[toPos]=fromId
-				
-				fromPieceNew.setMoved()
-				fromPieceNew.setSeen()
-				toPieceNew.setCaptured()
-				toPieceNew.possibleIds*=winMask
-				
-				boards.append((newBoard,winProb))
-				
-			if tieProb>0:
-				newBoard = ProbBoard(self,self.knownPlayer)
-				fromPieceNew = newBoard[fromPos]
-				toPieceNew = newBoard[toPos]
-
-				newBoard.grid[fromPos]=Board.EMPTY
-				newBoard.grid[toPos]=Board.EMPTY
-				
-				fromPieceNew.setMoved()
-				fromPieceNew.setCaptured()
-				toPieceNew.setCaptured()
-				
-				fromPiece.possibleIds*=tieMask
-				boards.append((newBoard,tieProb))
-				
-			if loseProb>0:
-				newBoard = ProbBoard(self,self.knownPlayer)
-				fromPieceNew = newBoard[fromPos]
-				toPieceNew = newBoard[toPos]
-
-				newBoard.grid[fromPos]=Board.EMPTY
-				
-				fromPieceNew.setMoved()
-				fromPieceNew.setCaptured()
-				toPieceNew.setSeen()
-				
-				fromPiece.possibleIds*=loseMask
-				boards.append((newBoard,loseProb))
-		
-		#Update probabilities
-		for board,prob in boards:
-			board.addProbabilities()
-		return boards
 
 
 	def capturedBonus(self, piecesLeft, piecesLeftOpp):

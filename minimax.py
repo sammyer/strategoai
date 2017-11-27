@@ -8,128 +8,146 @@ Created on Mon Jul 24 21:51:31 2017
 from board import Board, Move
 from ai import ProbBoard
 
-class BoardNode:
-	def __init__(self,board,prob=1.0):
-		self.board=board
-		self.prob=prob
-		self.localHeuristic=board.heuristic()
-		self.heuristic=self.localHeuristic
-		self.children=None #moves
-	
-	def expandNode(self, player):
-		self.searchMoves(player,1)
-	
-	def searchMoves(self, player, depth=1):
-		moves=self.board.getValidMoves(player)
-		self.children = [self.makeMoveNode(move) for move in moves]
-		isPlayer = player==self.board.knownPlayer
-		self.children.sort(key=lambda x:x.heuristic, reverse=isPlayer)
-		if depth>1:
-			for child in self.children:
-				child.searchMoves(3-player, depth-1)
-		self.heuristic=self.children[0].heuristic
-	
-	def makeMoveNode(self,move):
-		outcomes = self.board.applyMoveProbabilistic(move)
-		boards = [BoardNode(board,prob) for board,prob in outcomes]
-		return MoveNode(move, boards)
-	
-	def __getitem__(self,pos):
-		return self.children[pos]
-
-class MoveNode:
-	def __init__(self,move,boardNodes):
-		self.move=move
-		self.children=boardNodes #boards
-		self.localHeuristic = sum(board.prob * board.heuristic for board in boardNodes)
-		self.heuristic=self.localHeuristic
-	
-	def searchMoves(self, player, depth):
-		for child in self.children:
-			child.searchMoves(player, depth)
-		self.heuristic = sum(board.prob * board.heuristic for board in self.children)
-	
-	def __getitem__(self,pos):
-		return self.children[pos]
-
-
-
-def getSplitMoves(board,player):
-	moves=board.getValidMoves(player)
-	for move in moves:
-		move.isAttack = board.grid[move.toPos] != Board.EMPTY
-	attackingMoves=[move for move in moves if move.isAttack]
-	preSplits=[]
-	postSplits=[]
-	doubles=[]
-	
-	if player==board.knownPlayer:
-		for move in attackingMoves:
-			if board[move.toPos].seen:
-				# strightforward
-				preSplits.append(move)
-			else:
-				postSplits.append(move)
-	else:
-		for move in attackingMoves:
-			if board[move.fromPos].seen:
-				if board[move.toPos].seen:
-					pass
-				else:
-					postSplits.append(move)
-			else:
-				if board[move.toPos].seen:
-					preSplits.append(move)
-				else:
-					doubles.append(move)
-	splittingMoves=[]
-	for move in preSplits:
-		splittingMoves.append(("pre",move))
-	for move in postSplits:
-		splittingMoves.append(("post",move))
-	for move in doubles:
-		splittingMoves.append(("double",move))
-	return splittingMoves
 
 class Node:
-	def __init__(self, board, move=None, outcome=None, prob=1.0):
+	PRE_NODE="pre"
+	MOVE_NODE="move"
+	POST_NODE="post"
+	ROOT_NODE="root"
+	LEAF="leaf"
+	
+	def __init__(self, board, nodeType=ROOT_NODE, move=None, outcome=None, prob=1.0):
 		self.board = board
 		self.move = move
 		self.outcome = outcome
 		self.prob = prob
 		self.children=[]
 		self.value = 0
-		self.splitType = None
+		self.nodeType = nodeType
 	
-	def expandSplits(self,splitMoves,idx=0):
-		if idx == len(splitMoves):
-			return
-		splitType, move = splitMoves[idx]
-		self.splitType = splitType
+	def expand(self,player):
+		preSplits,postSplits,doubles = self.createSplits(self.board,player)
+		leafs = self.expandPreSplits(preSplits)
+		for leaf in leafs:
+			leaf.expandMoves(postSplits,doubles)
+		self.getCumProd()
+		self.getValues()
+	
+	def createSplits(self,board,player):
+		moves=board.getValidMoves(player)
+		for move in moves:
+			move.isAttack = board.grid[move.toPos] != Board.EMPTY
+		attackingMoves=[move for move in moves if move.isAttack]
+		preSplits=[]
+		postSplits=[]
+		doubles=[]
 		
-		if splitType == "pre":
-			attackerPos = move.fromPos
-			defender = self.board[move.toPos]
-			if not defender.seen:
-				raise Exception("Error: pre split defender must be seen")
-			results = self.board.splitOnAttacker(attackerPos, defender.rank)
-		elif splitType == "post":
+		if player==board.knownPlayer:
+			for move in attackingMoves:
+				if board[move.toPos].seen:
+					# strightforward
+					preSplits.append(move)
+				else:
+					postSplits.append(move)
+		else:
+			for move in attackingMoves:
+				if board[move.fromPos].seen:
+					if board[move.toPos].seen:
+						pass
+					else:
+						postSplits.append(move)
+				else:
+					if board[move.toPos].seen:
+						preSplits.append(move)
+					else:
+						doubles.append(move)
+		
+		return preSplits,postSplits,doubles
+
+	def expandPreSplits(self,preSplits,idx=0):
+		if idx == len(preSplits):
+			return [self]
+		move = preSplits[idx]
+		
+		attackerPos = move.fromPos
+		defender = self.board[move.toPos]
+		if not defender.seen:
+			raise Exception("Error: pre split defender must be seen")
+		results = self.board.splitOnAttacker(attackerPos, defender.rank)
+
+		leafs=[]
+		for outcome,prob,board in results:
+			board.addProbabilities()
+			child = Node(board, self.PRE_NODE,prob=prob)
+			self.children.append(child)
+			newLeafs = child.expandPreSplits(preSplits,idx+1)
+			leafs.extend(newLeafs)
+		return leafs
+
+	def expandMoves(self,postSplits,doubles):
+		moves=[]
+		for move in doubles:
+			results = self.board.splitOnDefenderDoubleBlind(move.toPos, move.fromPos)
+			moves.append((move,results))
+				
+		for move in postSplits:
 			defenderPos = move.toPos
 			attacker = self.board[move.fromPos]
 			if not attacker.seen:
 				raise Exception("Error: post split attacker must be seen")
 			results = self.board.splitOnDefender(defenderPos, attacker.rank)
-		elif splitType == "double":
-			results = self.board.splitOnDefenderDoubleBlind(move.toPos, move.fromPos)
+			moves.append((move,results))
+		
+		for move,results in moves:			
+			moveNode = Node(self.board, self.MOVE_NODE, move=move)
+			self.children.append(moveNode)
+			for outcome,prob,board in results:
+				board.applyMove(move,outcome)
+				board.addProbabilities()
+				child = Node(board, self.POST_NODE, move, outcome, prob)
+				moveNode.children.append(child)
 			
-		for outcome,prob,board in results:
-			if outcome == ProbBoard.IMMOVABLE or (splitType=="pre" and outcome == ProbBoard.LOSE):
-				continue
-			child = Node(board, move, outcome, prob*self.prob)
-			child.expandSplits(splitMoves,idx+1)
-			child.parentSplitType = splitType
-			self.children.append(child)
+	
+	def getLeafs(self):
+		if len(self.children)==0:
+			return [self]
+		else:
+			arr=[]
+			for child in self.children:
+				arr.extend(child.getLeafs())
+			return arr
+	
+	def getChildType(self):
+		if len(self.children)==0:
+			return self.LEAF
+		else:
+			return self.children[0].nodeType
 			
+	def getCumProd(self,prior=1.0):
+		self.cumProb=self.prob*prior
+		for child in self.children:
+			child.getCumProd(self.cumProb)
+	
+	def getValues(self):
+		childType=self.getChildType()
+		if childType==self.LEAF:
+			self.value = self.board.heuristic()
+		elif childType==self.MOVE_NODE:
+			self.value=max(child.getValue() for child in self.children)
+		elif childType==self.PRE_NODE or childType==self.POST_NODE:
+			self.value = sum(child.getValue()*child.prob for child in self.children)
+		return self.value
+	
+	def greedySearch(self):
+		childType=self.getChildType()
+		if childType==self.LEAF or childType==self.POST_NODE:
+			raise Exception("This should not happen")
+		elif childType==self.PRE_NODE:
+			node=max(self.children,key=lambda child:child.prob)
+			return node.greedySearch()
+		elif childType==self.MOVE_NODE:
+			node=max(self.children,key=lambda child:child.value)
+			return node
 		
 
 """
@@ -177,11 +195,11 @@ def makeBoard():
 	return board
 
 def getBestMove(board,player):
-	node=BoardNode(ProbBoard(board,player))
-	node.searchMoves(player)
-	move=node.children[0]
-	print(move.move,node.heuristic,move.heuristic)
-	return move.move
+	tree=Node(ProbBoard(board,player))
+	tree.expand(player)
+	node=tree.greedySearch()
+	print(node.move,node.value,node.cumProd)
+	return node.move
 
 def doMove(board,player):
 	board.applyMove(getBestMove(board,player))
@@ -200,5 +218,7 @@ def doMoves(board,n):
 board=Board()
 board.placeRandom()
 print(board)
-doMoves(board,5)
-print(board)
+#doMoves(board,5)
+#print(board)
+#node=Node(ProbBoard(board,1))
+#node.expand(1)
