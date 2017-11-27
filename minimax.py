@@ -31,7 +31,7 @@ class Node:
 		for leaf in leafs:
 			leaf.expandMoves(postSplits,doubles)
 		self.getCumProd()
-		self.getValues()
+		self.getValue()
 	
 	def createSplits(self,board,player):
 		moves=board.getValidMoves(player)
@@ -71,8 +71,8 @@ class Node:
 		
 		attackerPos = move.fromPos
 		defender = self.board[move.toPos]
-		if not defender.seen:
-			raise Exception("Error: pre split defender must be seen")
+		if not defender.known:
+			raise Exception("Error: pre split defender must be known")
 		results = self.board.splitOnAttacker(attackerPos, defender.rank)
 
 		leafs=[]
@@ -93,8 +93,9 @@ class Node:
 		for move in postSplits:
 			defenderPos = move.toPos
 			attacker = self.board[move.fromPos]
-			if not attacker.seen:
-				raise Exception("Error: post split attacker must be seen")
+			if not attacker.known:
+				print(move,attacker)
+				raise Exception("Error: post split attacker must be known")
 			results = self.board.splitOnDefender(defenderPos, attacker.rank)
 			moves.append((move,results))
 		
@@ -128,7 +129,7 @@ class Node:
 		for child in self.children:
 			child.getCumProd(self.cumProb)
 	
-	def getValues(self):
+	def getValue(self):
 		childType=self.getChildType()
 		if childType==self.LEAF:
 			self.value = self.board.heuristic()
@@ -148,6 +149,9 @@ class Node:
 		elif childType==self.MOVE_NODE:
 			node=max(self.children,key=lambda child:child.value)
 			return node
+	
+	def __repr__(self):
+		return "[NODE %s move=%s outcome=%s prob=%.2g value=%.1f]"%(self.nodeType,str(self.move),str(self.outcome),self.prob,self.value)
 		
 
 """
@@ -220,5 +224,5 @@ board.placeRandom()
 print(board)
 #doMoves(board,5)
 #print(board)
-#node=Node(ProbBoard(board,1))
-#node.expand(1)
+node=Node(ProbBoard(board,1))
+node.expand(1)

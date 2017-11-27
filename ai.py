@@ -22,6 +22,7 @@ class ProbPiece(Piece):
 		self.char=piece.char
 		self.rank=None
 		if isKnown:
+			self.known = isKnown
 			self.rank=piece.rank
 			
 		if hasattr(piece,"possibleIds"):
@@ -80,7 +81,7 @@ class ProbPiece(Piece):
 		self.captured=True
 	
 	def __repr__(self):
-		return "[Piece player=%d seen=%b rank=%s captured=%b"%(self.player,self.seen,str(self.rank),self.captured)
+		return "[Piece player=%d seen=%d rank=%s captured=%d"%(self.player,self.seen,str(self.rank),self.captured)
 
 
 
