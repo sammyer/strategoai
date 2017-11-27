@@ -26,10 +26,10 @@ class Node:
 		self.nodeType = nodeType
 	
 	def expand(self,player):
-		preSplits,postSplits,doubles = self.createSplits(self.board,player)
+		preSplits,postSplits,doubles,nonattacking = self.createSplits(self.board,player)
 		leafs = self.expandPreSplits(preSplits)
 		for leaf in leafs:
-			leaf.expandMoves(postSplits,doubles)
+			leaf.expandMoves(postSplits,doubles,nonattacking)
 		self.getCumProd()
 		self.getValue()
 	
@@ -37,18 +37,15 @@ class Node:
 		moves=board.getValidMoves(player)
 		for move in moves:
 			move.isAttack = board.grid[move.toPos] != Board.EMPTY
-		attackingMoves=[move for move in moves if move.isAttack]
+		attackingMoves = [move for move in moves if move.isAttack]
+		nonattacking = [move for move in moves if not move.isAttack]
 		preSplits=[]
 		postSplits=[]
 		doubles=[]
 		
 		if player==board.knownPlayer:
 			for move in attackingMoves:
-				if board[move.toPos].seen:
-					# strightforward
-					preSplits.append(move)
-				else:
-					postSplits.append(move)
+				postSplits.append(move)
 		else:
 			for move in attackingMoves:
 				if board[move.fromPos].seen:
@@ -62,7 +59,7 @@ class Node:
 					else:
 						doubles.append(move)
 		
-		return preSplits,postSplits,doubles
+		return preSplits,postSplits,doubles, nonattacking
 
 	def expandPreSplits(self,preSplits,idx=0):
 		if idx == len(preSplits):
@@ -84,7 +81,7 @@ class Node:
 			leafs.extend(newLeafs)
 		return leafs
 
-	def expandMoves(self,postSplits,doubles):
+	def expandMoves(self,postSplits,doubles,nonattacking):
 		moves=[]
 		for move in doubles:
 			results = self.board.splitOnDefenderDoubleBlind(move.toPos, move.fromPos)
@@ -107,7 +104,12 @@ class Node:
 				board.addProbabilities()
 				child = Node(board, self.POST_NODE, move, outcome, prob)
 				moveNode.children.append(child)
-			
+
+		for move in nonattacking:
+			board = ProbBoard(self.board, self.board.knownPlayer)
+			board.applyMove(move,None)
+			moveNode = Node(board, self.MOVE_NODE, move=move)			
+			self.children.append(moveNode)
 	
 	def getLeafs(self):
 		if len(self.children)==0:
@@ -202,7 +204,7 @@ def getBestMove(board,player):
 	tree=Node(ProbBoard(board,player))
 	tree.expand(player)
 	node=tree.greedySearch()
-	print(node.move,node.value,node.cumProd)
+	print(node.move,node.value,node.cumProb)
 	return node.move
 
 def doMove(board,player):
@@ -222,7 +224,7 @@ def doMoves(board,n):
 board=Board()
 board.placeRandom()
 print(board)
-#doMoves(board,5)
+doMoves(board,5)
 #print(board)
 node=Node(ProbBoard(board,1))
 node.expand(1)

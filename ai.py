@@ -21,8 +21,8 @@ class ProbPiece(Piece):
 		self.seen=piece.seen
 		self.char=piece.char
 		self.rank=None
+		self.known = isKnown
 		if isKnown:
-			self.known = isKnown
 			self.rank=piece.rank
 			
 		if hasattr(piece,"possibleIds"):
@@ -199,11 +199,9 @@ class ProbBoard(Board):
 		for outcome in (self.WIN, self.TIE, self.LOSS):
 			mask = rankOutcomes==outcome
 			prob=np.dot(mask, defender.probs)
-			if prob==0:
-				board = None
-			else:
+			if prob>0:
 				board = self.maskBoard(defenderPos,mask)
-			boards.append((outcome,prob,board))
+				boards.append((outcome,prob,board))
 		return boards
 	
 	def splitOnAttacker(self,attackerPos,defenderRank):
@@ -229,11 +227,9 @@ class ProbBoard(Board):
 			else:
 				mask = rankOutcomes==outcome
 			prob=np.dot(mask, attacker.probs)
-			if prob==0:
-				board = None
-			else:
+			if prob>0:
 				board = self.maskBoard(attackerPos,mask)
-			boards.append((outcome,prob,board))
+				boards.append((outcome,prob,board))
 		return boards
 	
 	def splitOnDefenderDoubleBlind(self,defenderPos,attackerPos):
@@ -262,11 +258,9 @@ class ProbBoard(Board):
 		
 		boards=[]
 		for outcome,prob in zip(outcomes,outcomeProbs):
-			if prob==0:
-				board = None
-			else:
+			if prob>0:
 				board = self.maskBoard(defenderPos,mask)
-			boards.append((outcome,prob,board))
+				boards.append((outcome,prob,board))
 		return boards
 	
 	
@@ -291,6 +285,8 @@ class ProbBoard(Board):
 			self.applyLoss(move.fromPos,move.toPos)
 		elif outcome==self.TIE:
 			self.applyTie(move.fromPos,move.toPos)
+		else:
+			self.applyNonattack(move.fromPos,move.toPos)
 
 	def applyWin(self,fromPos,toPos):
 		#fromPiece.setMoved()
@@ -313,7 +309,12 @@ class ProbBoard(Board):
 		self[toPos].setSeen()
 		
 		self.grid[fromPos]=Board.EMPTY
-		
+	
+	def applyNonattack(self,fromPos,toPos):
+		self[fromPos].setMoved()
+
+		self.grid[toPos]=self.grid[fromPos]
+		self.grid[fromPos]=Board.EMPTY
 
 
 	def capturedBonus(self, piecesLeft, piecesLeftOpp):
