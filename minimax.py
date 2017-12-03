@@ -8,16 +8,19 @@ Created on Mon Jul 24 21:51:31 2017
 from board import Board, Move
 from ai import ProbBoard
 
+		
+		
 
-class Node:
+class Node(object):
 	PRE_NODE="pre"
 	MOVE_NODE="move"
 	POST_NODE="post"
 	ROOT_NODE="root"
 	LEAF="leaf"
 	
-	def __init__(self, board, nodeType=ROOT_NODE, move=None, outcome=None, prob=1.0):
+	def __init__(self, board, nodeType=ROOT_NODE, player=None, move=None, outcome=None, prob=1.0):
 		self.board = board
+		self.player = player
 		self.move = move
 		self.outcome = outcome
 		self.prob = prob
@@ -29,9 +32,7 @@ class Node:
 		preSplits,postSplits,doubles,nonattacking = self.createSplits(self.board,player)
 		leafs = self.expandPreSplits(preSplits)
 		for leaf in leafs:
-			leaf.expandMoves(postSplits,doubles,nonattacking)
-		self.getCumProd()
-		self.getValue()
+			leaf.expandMoves(postSplits,doubles,nonattacking,player)
 	
 	def createSplits(self,board,player):
 		moves=board.getValidMoves(player)
@@ -81,7 +82,7 @@ class Node:
 			leafs.extend(newLeafs)
 		return leafs
 
-	def expandMoves(self,postSplits,doubles,nonattacking):
+	def expandMoves(self,postSplits,doubles,nonattacking,player):
 		moves=[]
 		for move in doubles:
 			results = self.board.splitOnDefenderDoubleBlind(move.toPos, move.fromPos)
@@ -96,19 +97,22 @@ class Node:
 			results = self.board.splitOnDefender(defenderPos, attacker.rank)
 			moves.append((move,results))
 		
-		for move,results in moves:			
-			moveNode = Node(self.board, self.MOVE_NODE, move=move)
+		for move,results in moves:
+			if len(results)==1 and results[0][0]==ProbBoard.LOSS:
+				#print("Skipping losing move")
+				continue
+			moveNode = Node(self.board, self.MOVE_NODE, player=player, move=move)
 			self.children.append(moveNode)
 			for outcome,prob,board in results:
 				board.applyMove(move,outcome)
 				board.addProbabilities()
-				child = Node(board, self.POST_NODE, move, outcome, prob)
+				child = Node(board, self.POST_NODE, player, move, outcome, prob)
 				moveNode.children.append(child)
 
 		for move in nonattacking:
 			board = ProbBoard(self.board, self.board.knownPlayer)
 			board.applyMove(move,None)
-			moveNode = Node(board, self.MOVE_NODE, move=move)			
+			moveNode = Node(board, self.MOVE_NODE, player=player, move=move)			
 			self.children.append(moveNode)
 	
 	def getLeafs(self):
@@ -131,14 +135,16 @@ class Node:
 		for child in self.children:
 			child.getCumProd(self.cumProb)
 	
-	def getValue(self):
+	def getValue(self, player):
 		childType=self.getChildType()
 		if childType==self.LEAF:
 			self.value = self.board.heuristic()
 		elif childType==self.MOVE_NODE:
-			self.value=max(child.getValue() for child in self.children)
+			movePlayer = self.children[0].player
+			minimax = max if movePlayer==player else min
+			self.value=minimax(child.getValue(player) for child in self.children)
 		elif childType==self.PRE_NODE or childType==self.POST_NODE:
-			self.value = sum(child.getValue()*child.prob for child in self.children)
+			self.value = sum(child.getValue(player)*child.prob for child in self.children)
 		return self.value
 	
 	def greedySearch(self):
@@ -146,8 +152,9 @@ class Node:
 		if childType==self.LEAF or childType==self.POST_NODE:
 			raise Exception("This should not happen")
 		elif childType==self.PRE_NODE:
-			node=max(self.children,key=lambda child:child.prob)
-			return node.greedySearch()
+			raise Exception("This should not happen either - since pre-nodes are only for opponent moves")
+			#node=max(self.children,key=lambda child:child.prob)
+			#return node.greedySearch()
 		elif childType==self.MOVE_NODE:
 			node=max(self.children,key=lambda child:child.value)
 			return node
@@ -155,7 +162,36 @@ class Node:
 	def __repr__(self):
 		return "[NODE %s move=%s outcome=%s prob=%.2g value=%.1f]"%(self.nodeType,str(self.move),str(self.outcome),self.prob,self.value)
 		
-
+	def expandAll(self,player, level):
+		queue=[self]
+		curPlayer=player
+		self.heuristic=self.board.heuristic()
+		for i in range(level):
+			print(len(queue))
+			leafs=[]
+			for node in queue:
+				node.expand(curPlayer)
+				node.getCumProd()
+				node.getValue(player)
+				node.moves=node.getMoves()
+				for move in node.moves:
+					move.heuristic = move.value
+				leafs.extend([leaf for leaf in node.getLeafs() if leaf.cumProb>0.005])
+			curPlayer=3-curPlayer
+			queue=leafs
+		self.getCumProd()
+		self.getValue(player)
+	
+	def getMoves(self):
+		if self.nodeType==self.MOVE_NODE:
+			return [self]
+		else:
+			arr=[]
+			for child in self.children:
+				arr.extend(child.getMoves())
+			return arr
+			
+		
 """
 01 function alphabeta(node, depth, α, β, maximizingPlayer)
 02      if depth = 0 or node is a terminal node
@@ -178,27 +214,7 @@ class Node:
 19          return v
 """
 
-def searchTreeAux(node,depth,alpha,beta, maximizingPlayer):
-	node.expandNode()
 
-def searchTree(board,depth,player=1):
-	# Note: player here denotes the player whose perspecitve it is for hidden pieces
-	# This is not necesarrily whose player is making the move
-	root=BoardNode(ProbBoard(board,player))
-	searchTreeAux(root,depth,-np.inf,np.inf, True)
-
-
-def makeBoardTree(board, player=1):
-	return BoardNode(ProbBoard(board,player))
-
-def makeBoard():
-	board=Board()
-	board.placeRandom()
-	moves=board.getValidMoves(1)
-	board.applyMove(moves[0])
-	moves=board.getValidMoves(1)
-	board.applyMove(moves[2])
-	return board
 
 def getBestMove(board,player):
 	tree=Node(ProbBoard(board,player))
@@ -216,15 +232,14 @@ def doMoves(board,n):
 		board.applyMove(getBestMove(board,1))
 		board.applyMove(getBestMove(board,2))
 
-#board2=makeBoard()
-
-#tree=makeBoardTree(board2)
-#tree.searchMoves(1)
-
-board=Board()
-board.placeRandom()
-print(board)
-doMoves(board,5)
+#board=Board()
+#board.placeRandom()
 #print(board)
-node=Node(ProbBoard(board,1))
-node.expand(1)
+#doMoves(board,5)
+#print(board)
+#node=Node(ProbBoard(board,1))
+#node.expand(1)
+
+node=Node(ProbBoard(board2,2))
+node.expandAll(2,2)
+
