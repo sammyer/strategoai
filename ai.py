@@ -400,9 +400,9 @@ class ProbBoard(Board):
 					continue
 				player=self.pieces[pieceId].player
 				if player==1:
-					numSpaces = max(6-y, 0)
+					numSpaces = max(9-y, 0)
 				elif player==2:
-					numSpaces = max(y-3, 0)
+					numSpaces = max(y, 0)
 				if player==self.knownPlayer:
 					playerSpacesAdvanced += numSpaces
 				else:
