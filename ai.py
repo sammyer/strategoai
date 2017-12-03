@@ -21,15 +21,15 @@ class ProbPiece(Piece):
 		self.seen=piece.seen
 		self.char=piece.char
 		self.rank=None
-		self.known = isKnown
-		if isKnown:
+		self.known = isKnown or self.seen or self.captured
+		if self.known:
 			self.rank=piece.rank
 			
 		if hasattr(piece,"possibleIds"):
 			self.possibleIds=piece.possibleIds.copy()
 		else:
 			
-			if piece.seen or piece.captured or isKnown:
+			if self.known:
 				self.possibleIds=np.zeros((12,),dtype=int)
 				self.possibleIds[piece.rank]=1
 			else:
@@ -156,7 +156,7 @@ class ProbBoard(Board):
 	def getAttackerMask(self,defenderRank):
 		# row  1=win, 0=tie, -1=lose, -2=immovable
 		mask=np.full(12, self.LOSS, dtype=int)
-		mask[0,defenderRank+1:] = self.WIN
+		mask[defenderRank+1:] = self.WIN
 		if defenderRank==Piece.BOMB: mask[Piece.MINER] = self.WIN
 		if defenderRank==Piece.MARSHALL: mask[Piece.SPY] = self.WIN
 		mask[defenderRank] = self.TIE
