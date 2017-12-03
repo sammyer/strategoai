@@ -4,8 +4,6 @@ Created on Fri Jul 07 12:38:17 2017
 
 @author: sam
 
-TODO: make ProbabilisticPiece and ProbabilisticBoard
-make heuristic probabilistic
 
 """
 
@@ -17,6 +15,8 @@ def normalize(x):
 		return x
 	else:
 		return x/s
+
+
 
 class Piece:
 	FLAG=0
@@ -55,7 +55,7 @@ class Piece:
 		return self.rank==self.SCOUT
 	
 	def __repr__(self):
-		return "%d:%d"%(self.player,self.rank)
+		return "[player=%d rank=%d seen=%d]"%(self.player,self.rank,self.seen)
 
 class Move:
 	def __init__(self,fromX,fromY,toX,toY):
