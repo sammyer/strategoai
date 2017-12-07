@@ -21,22 +21,24 @@ class ProbPiece(Piece):
 		self.seen=piece.seen
 		self.char=piece.char
 		self.rank=None
-		self.known = isKnown or self.seen or self.captured
-		if self.known:
-			self.rank=piece.rank
 			
 		if hasattr(piece,"possibleIds"):
 			self.possibleIds=piece.possibleIds.copy()
+			self.known = np.count_nonzero(self.possibleIds)==1
+			if self.known:
+				self.rank=np.argmax(self.possibleIds)
 		else:
+			self.known = isKnown or self.seen or self.captured
 			
 			if self.known:
 				self.possibleIds=np.zeros((12,),dtype=int)
 				self.possibleIds[piece.rank]=1
+				self.rank = piece.rank
 			else:
 				self.possibleIds=np.ones((12,),dtype=int) # unknown piece
-			if piece.moved:
-				self.possibleIds[Piece.BOMB]=0
-				self.possibleIds[Piece.FLAG]=0			
+				if piece.moved:
+					self.possibleIds[Piece.BOMB]=0
+					self.possibleIds[Piece.FLAG]=0			
 	
 	
 	def defeats(self,defender):

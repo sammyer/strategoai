@@ -5,7 +5,7 @@ Created on Mon Jul 24 21:51:31 2017
 @author: sam
 """
 
-from board import Board, Move
+from board import Board, Move, Outcome
 from ai import ProbBoard
 
 		
@@ -35,85 +35,65 @@ class Node(object):
 			leaf.expandMoves(postSplits,doubles,nonattacking,player)
 	
 	def createSplits(self,board,player):
+		""" Move types:
+		1. Non-attacking
+		2. Known
+		3. Unknown defender
+		4. Unknown attacker
+		5. Double blind
+		"""
+		MOVE_ONLY=1
+		KNOWN=2
+		UNKNOWN_DEF=3
+		UNKNOWN_ATT=4
+		DOUBLE_BLIND=5
+		FUTURE_KNOWN_DEF=6
+		
 		moves=board.getValidMoves(player)
+		moveResults=[]
 		for move in moves:
-			move.isAttack = board.grid[move.toPos] != Board.EMPTY
-		attackingMoves = [move for move in moves if move.isAttack]
-		nonattacking = [move for move in moves if not move.isAttack]
-		preSplits=[]
-		postSplits=[]
-		doubles=[]
-		
-		if player==board.knownPlayer:
-			for move in attackingMoves:
-				postSplits.append(move)
-		else:
-			for move in attackingMoves:
-				if board[move.fromPos].seen:
-					if board[move.toPos].seen:
-						pass
-					else:
-						postSplits.append(move)
-				else:
-					if board[move.toPos].seen:
-						preSplits.append(move)
-					else:
-						doubles.append(move)
-		
-		return preSplits,postSplits,doubles, nonattacking
-
-	def expandPreSplits(self,preSplits,idx=0):
-		if idx == len(preSplits):
-			return [self]
-		move = preSplits[idx]
-		
-		attackerPos = move.fromPos
-		defender = self.board[move.toPos]
-		if not defender.known:
-			raise Exception("Error: pre split defender must be known")
-		results = self.board.splitOnAttacker(attackerPos, defender.rank)
-
-		leafs=[]
-		for outcome,prob,board in results:
-			board.addProbabilities()
-			child = Node(board, self.PRE_NODE,prob=prob)
-			self.children.append(child)
-			newLeafs = child.expandPreSplits(preSplits,idx+1)
-			leafs.extend(newLeafs)
-		return leafs
-
-	def expandMoves(self,postSplits,doubles,nonattacking,player):
-		moves=[]
-		for move in doubles:
-			results = self.board.splitOnDefenderDoubleBlind(move.toPos, move.fromPos)
-			moves.append((move,results))
+			attacker = board[move.fromPos]
+			defender = board[move.toPos]
+			if board.grid[move.toPos] == Board.EMPTY:
+				moveType = MOVE_ONLY
+				results=[(Outcome.MOVE,1.0,board.copy())]
 				
-		for move in postSplits:
-			defenderPos = move.toPos
-			attacker = self.board[move.fromPos]
-			if not attacker.known:
-				print(move,attacker)
-				raise Exception("Error: post split attacker must be known")
-			results = self.board.splitOnDefender(defenderPos, attacker.rank)
-			moves.append((move,results))
-		
-		for move,results in moves:
-			if len(results)==1 and results[0][0]==ProbBoard.LOSS:
+			elif attacker.known and defender.known:
+				moveType=KNOWN
+				outcome = Outcome.fromRank(attacker.rank, defender.rank)
+				results=[(outcome,1.0,board.copy())]
+				
+			elif attacker.known: # to unknown
+				moveType = FUTURE_KNOWN_DEF if attacker.seen else UNKNOWN_DEF
+				results = self.board.splitOnDefender(move.toPos, attacker.rank)
+				
+			elif defender.known:
+				moveType = UNKNOWN_ATT
+				results = self.board.splitOnAttacker(move.fromPos, defender.rank)
+				results=[result for result in results if result[0] != Outcome.LOSS]
+				
+			else:
+				moveType = DOUBLE_BLIND
+				results = self.board.splitOnDefenderDoubleBlind(move.toPos, move.fromPos)
+			
+			moveResults.append([moveType,move,results])
+
+		for moveType,move,results in moveResults:
+			if len(results)==1 and results[0][0]==Outcome.LOSS:
 				#print("Skipping losing move")
 				continue
+
 			moveNode = Node(self.board, self.MOVE_NODE, player=player, move=move)
 			self.children.append(moveNode)
+			#prenode = outcome known before taking the move.  post-node = outcome known after
+			nodeType = self.PRE_NODE if moveType in (UNKNOWN_ATT, FUTURE_KNOWN_DEF) else self.POST_NODE
 			for outcome,prob,board in results:
 				board.applyMove(move,outcome)
 				board.addProbabilities()
-				child = Node(board, self.POST_NODE, player, move, outcome, prob)
+				
+				child = Node(board, nodeType, player, move, outcome, prob)
 				moveNode.children.append(child)
 
-		for move in nonattacking:
-			board = ProbBoard(self.board, self.board.knownPlayer)
-			board.applyMove(move,None)
-			moveNode = Node(board, self.MOVE_NODE, player=player, move=move)			
-			self.children.append(moveNode)
 	
 	def getLeafs(self):
 		if len(self.children)==0:
