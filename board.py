@@ -16,8 +16,6 @@ def normalize(x):
 	else:
 		return x/s
 
-
-
 class Piece:
 	FLAG=0
 	SPY=1
@@ -40,12 +38,7 @@ class Piece:
 
 	
 	def defeats(self,defender):
-		win=np.sign(self.rank - defender.rank)
-		if self.rank==Piece.MINER and defender.rank==Piece.BOMB:
-			win=1
-		elif self.rank==Piece.SPY and defender.rank==Piece.MARSHALL:
-			win=1
-		return win
+		return Outcome.fromRanks(self.rank, defender.rank)
 	
 	@property
 	def moveable(self):
@@ -57,7 +50,49 @@ class Piece:
 	def __repr__(self):
 		return "[player=%d rank=%d seen=%d]"%(self.player,self.rank,self.seen)
 
+class Outcome:
+	WIN=1
+	TIE=0
+	LOSS=-1
+	IMMOVABLE=-2
+	MOVE=2
+	
+	GRID=None
+	
+	@classmethod
+	def fromRanks(cls, attacker, defender):
+		if attacker == Piece.MINER and defender==Piece.BOMB:
+			return cls.WIN
+		elif attacker == Piece.SPY and defender == PIECE.MARSHALL:
+			return cls.WIN
+		elif attacker == Piece.FLAG or attacker == Piece.BOMB:
+			return cls.IMMOVABLE
+		elif attacker > defender:
+			return cls.WIN
+		elif attacker < defender:
+			return cls.LOSS
+		elif attacker == defender:
+			return cls.TIE
+	
+	@classmethod
+	def getGrid(cls):
+		if cls.GRID is None:
+			cls.GRID=np.array([[cls.fromRanks(attacker,defender) for defender in range(12)] for attacker in range(12)],dtype=int)
+		return cls.GRID
+		
+	@classmethod
+	def getDefenderMask(cls,attackerRank):
+		# row  1=win, 0=tie, -1=lose
+		return cls.getGrid()[attackerRank]
+		
+	@classmethod	
+	def getAttackerMask(cls,defenderRank):
+		# row  1=win, 0=tie, -1=lose, -2=immovable
+		return cls.getGrid()[:,defenderRank]
+
+
 class Move:
+	
 	def __init__(self,fromX,fromY,toX,toY):
 		self.fromX=fromX
 		self.fromY=fromY

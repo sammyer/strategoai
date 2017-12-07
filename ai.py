@@ -4,7 +4,7 @@ Created on Sat Jul 22 22:50:32 2017
 
 @author: sam
 """
-from board import Piece, Board
+from board import Piece, Board, Outcome
 import numpy as np
 
 DEBUG_MODE=False
@@ -139,32 +139,6 @@ class ProbBoard(Board):
 		self.probabilities=np.array([piece.probs for piece in self.pieces])
 
 
-	WIN=1
-	TIE=0
-	LOSS=-1
-	IMMOVABLE=-2
-
-	def getDefenderMask(self,attackerRank):
-		# row  1=win, 0=tie, -1=lose
-		mask=np.full(12, self.LOSS, dtype=int)
-		mask[:attackerRank] = self.WIN
-		if attackerRank==Piece.MINER: mask[Piece.BOMB] = self.WIN
-		if attackerRank==Piece.SPY: mask[Piece.MARSHALL] = self.WIN
-		mask[attackerRank] = self.TIE
-		return mask
-	
-	def getAttackerMask(self,defenderRank):
-		# row  1=win, 0=tie, -1=lose, -2=immovable
-		mask=np.full(12, self.LOSS, dtype=int)
-		mask[defenderRank+1:] = self.WIN
-		if defenderRank==Piece.BOMB: mask[Piece.MINER] = self.WIN
-		if defenderRank==Piece.MARSHALL: mask[Piece.SPY] = self.WIN
-		mask[defenderRank] = self.TIE
-
-		mask[Piece.BOMB] = self.IMMOVABLE
-		mask[Piece.FLAG] = self.IMMOVABLE
-		return mask
-
 	"""
 	Note : for attacks there are 7 possible situations
 	1. Player attacks, opponent known (complete information)
@@ -191,12 +165,12 @@ class ProbBoard(Board):
 			prob - probability of board configuration (all probs add to one)
 			board - new board
 		"""
-		rankOutcomes = self.getDefenderMask(attackerRank)
+		rankOutcomes = Outcome.getDefenderMask(attackerRank)
 		defender = self[defenderPos]
 		assert(not defender is None)
 		
 		boards=[]
-		for outcome in (self.WIN, self.TIE, self.LOSS):
+		for outcome in (Outcome.WIN, Outcome.TIE, Outcome.LOSS):
 			mask = rankOutcomes==outcome
 			prob=np.dot(mask, defender.probs)
 			if prob>0:
@@ -215,15 +189,15 @@ class ProbBoard(Board):
 		This is "pre-split", meaning we have to consider every possibile outcome, calculated a different expected value
 		for each possibility, and take the max path based on the outcome.
 		"""
-		rankOutcomes = self.getAttackerMask(defenderRank)
+		rankOutcomes = Outcome.getAttackerMask(defenderRank)
 		attacker = self[attackerPos]
 		assert(not attacker is None)
 		
 		boards=[]
-		for outcome in (self.WIN, self.TIE, self.LOSS):
+		for outcome in (Outcome.WIN, Outcome.TIE, Outcome.LOSS):
 			# Combine immovable and loss, since in either case, we won't be taking the move
-			if outcome == self.LOSS:
-				mask = (rankOutcomes==self.LOSS)|(rankOutcomes==self.IMMOVABLE)
+			if outcome == Outcome.LOSS:
+				mask = (rankOutcomes==Outcome.LOSS)|(rankOutcomes==Outcome.IMMOVABLE)
 			else:
 				mask = rankOutcomes==outcome
 			prob=np.dot(mask, attacker.probs)
@@ -245,12 +219,12 @@ class ProbBoard(Board):
 		assert(not defender is None)
 
 		# Matrix of size (outcomes, ranks)
-		outcomes=[self.WIN, self.TIE, self.LOSS]
+		outcomes=[Outcome.WIN, Outcome.TIE, Outcome.LOSS]
 		rankOutcomeProbs = np.zeros((3,12))
 		
 		for rank,rankProb in enumerate(attacker.probs):
 			if rankProb>0:
-				mask = self.getDefenderMask(rank)
+				mask = Outcome.getDefenderMask(rank)
 				for idx,outcome in enumerate(outcomes):
 					rankOutcomeProbs[idx] += (mask==outcome)*rankProb
 				
@@ -279,11 +253,11 @@ class ProbBoard(Board):
 		return newBoard
 
 	def applyMove(self,move,outcome):
-		if outcome==self.WIN:
+		if outcome==Outcome.WIN:
 			self.applyWin(move.fromPos,move.toPos)
-		elif outcome==self.LOSS:
+		elif outcome==Outcome.LOSS:
 			self.applyLoss(move.fromPos,move.toPos)
-		elif outcome==self.TIE:
+		elif outcome==Outcome.TIE:
 			self.applyTie(move.fromPos,move.toPos)
 		else:
 			self.applyNonattack(move.fromPos,move.toPos)
@@ -316,6 +290,8 @@ class ProbBoard(Board):
 		self.grid[toPos]=self.grid[fromPos]
 		self.grid[fromPos]=Board.EMPTY
 
+	def copy(self):
+		return ProbBoard(self,self.knownPlayer)
 
 	def capturedBonus(self, piecesLeft, piecesLeftOpp):
 		points=0
