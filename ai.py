@@ -369,6 +369,7 @@ class ProbBoard(Board):
 
 
 		# Points for advancing pieces into opponents area
+		# TODO: add better heurstic for moving pieces in complex paths
 		playerSpacesAdvanced=0
 		opponentSpacesAdvanced=0
 		for x in range(10):

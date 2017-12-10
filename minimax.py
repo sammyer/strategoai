@@ -12,13 +12,11 @@ from ai import ProbBoard
 		
 
 class Node(object):
-	PRE_NODE="pre"
-	MOVE_NODE="move"
-	POST_NODE="post"
-	ROOT_NODE="root"
-	LEAF="leaf"
+	MAYBE_MOVE_NODE=3
+	MOVE_NODE=1
+	BOARD_NODE=4
 	
-	def __init__(self, board, nodeType=ROOT_NODE, player=None, move=None, outcome=None, prob=1.0):
+	def __init__(self, board, nodeType=BOARD_NODE, player=None, move=None, outcome=None, prob=1.0):
 		self.board = board
 		self.player = player
 		self.move = move
@@ -70,7 +68,6 @@ class Node(object):
 			elif defender.known:
 				moveType = UNKNOWN_ATT
 				results = self.board.splitOnAttacker(move.fromPos, defender.rank)
-				results=[result for result in results if result[0] != Outcome.LOSS]
 				
 			else:
 				moveType = DOUBLE_BLIND
@@ -83,18 +80,69 @@ class Node(object):
 				#print("Skipping losing move")
 				continue
 
-			moveNode = Node(self.board, self.MOVE_NODE, player=player, move=move)
-			self.children.append(moveNode)
 			#prenode = outcome known before taking the move.  post-node = outcome known after
-			nodeType = self.PRE_NODE if moveType in (UNKNOWN_ATT, FUTURE_KNOWN_DEF) else self.POST_NODE
-			for outcome,prob,board in results:
-				board.applyMove(move,outcome)
-				board.addProbabilities()
+			attackerKnowsSomethingWeDont = moveType in (UNKNOWN_ATT, FUTURE_KNOWN_DEF)
+			if not attackerKnowsSomethingWeDont:
+				# This is the case where the attacker has perfect knowledge, be we (the AI) don't
+				# In this case, attacker will only take winning moves, but we have to guess if the move is winning
+				# This is why losses are excluded and moves are given a probability depending on whether they are available
+				# In this case every move, outcome pair is represented as a move node ,and the move node has only one child
+				for outcome,prob,board in results:
+					if outcome == Outcome.LOSS:
+						continue
+					moveNode = Node(self.board, self.MAYBE_MOVE_NODE, player, move, outcome, prob)
+					self.children.append(moveNode)
+					
+					board.applyMove(move,outcome)
+					board.addProbabilities()
+					
+					child = Node(board, self.BOARD_NODE, player, move, outcome, 1.0)
+					moveNode.children.append(child)
+			else:
+				# This is the normal situation, where we know as much as the attacker
+				# The move can have different outcomes with a prob distribution, which are
+				# represented as child nodes of the move
+				moveNode = Node(self.board, self.MOVE_NODE, player=player, move=move)
+				self.children.append(moveNode)
 				
-				child = Node(board, nodeType, player, move, outcome, prob)
-				moveNode.children.append(child)
+				for outcome,prob,board in results:
+					board.applyMove(move,outcome)
+					board.addProbabilities()
+					
+					child = Node(board, self.BOARD_NODE, player, move, outcome, prob)
+					moveNode.children.append(child)
 
-	
+	def getBoardValue(self, player):
+		if self.nodeType != self.BOARD_NODE:
+			raise Exception("getBoardValue must be called on board nodes")
+		if len(self.children)==0:
+			return self.board.heuristic()
+		minimax = max if self.children[0].player==player else min
+		for child in self.children:
+			child.getMoveValue(player)
+		
+		candidates=list(self.children)
+		prob=1.0
+		bestMove=minimax(candidates, key=lambda node:node.value)
+		if bestMove.nodeType == self.MAYBE_MOVE_NODE:
+			value = prob*bestMove.value
+			prob *= (1-bestMove.prob)
+			candidates = [node for node in candidates if not (node.nodeType==self.MAYBE_MOVE_NODE and node.move.fromPos==bestMove.move.fromPos) ]
+			if len(candidates)==0:
+				raise Exception("What now?")
+			bestMove=minimax(candidates, key=lambda node:node.value)
+			# Loop here
+		else:
+			self.value = bestMove.value
+		return self.value
+
+	def getMoveValue(self,player):
+		if not self.nodeType in (self.MOVE_NODE, self.MAYBE_MOVE_NODE):
+			raise Exception("getMoveValue must be called on move nodes")
+		self.value = sum(child.getBoardValue(player)*child.prob for child in self.children)
+		return self.value
+
+	"""	
 	def getLeafs(self):
 		if len(self.children)==0:
 			return [self]
@@ -170,6 +218,7 @@ class Node(object):
 			for child in self.children:
 				arr.extend(child.getMoves())
 			return arr
+	"""
 			
 		
 """
