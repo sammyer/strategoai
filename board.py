@@ -63,7 +63,7 @@ class Outcome:
 	def fromRanks(cls, attacker, defender):
 		if attacker == Piece.MINER and defender==Piece.BOMB:
 			return cls.WIN
-		elif attacker == Piece.SPY and defender == PIECE.MARSHALL:
+		elif attacker == Piece.SPY and defender == Piece.MARSHALL:
 			return cls.WIN
 		elif attacker == Piece.FLAG or attacker == Piece.BOMB:
 			return cls.IMMOVABLE

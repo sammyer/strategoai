@@ -5,8 +5,7 @@ Created on Tue Nov 28 22:27:03 2017
 @author: sam
 """
 
-import Tkinter as tk
-import tkFont
+import tkinter as tk
 from board import Board, Move
 import minimax
 
@@ -21,7 +20,7 @@ def getPieceChar(player,rank):
 		rank=-1
 	player=1 if player==1 else 2
 	unicode_int=chars[player][rank]
-	return unichr(unicode_int)
+	return chr(unicode_int)
 
 class BoardUI(tk.Canvas):
 	def __init__(self, root, board, size=300):
