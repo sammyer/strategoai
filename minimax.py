@@ -27,10 +27,9 @@ class Node(object):
 		self.nodeType = nodeType
 	
 	def expand(self,player):
-		preSplits,postSplits,doubles,nonattacking = self.createSplits(self.board,player)
-		leafs = self.expandPreSplits(preSplits)
-		for leaf in leafs:
-			leaf.expandMoves(postSplits,doubles,nonattacking,player)
+		self.createSplits(self.board,player)
+		self.getBoardValue(player)
+		self.getCumProd()
 	
 	def createSplits(self,board,player):
 		""" Move types:
@@ -58,7 +57,7 @@ class Node(object):
 				
 			elif attacker.known and defender.known:
 				moveType=KNOWN
-				outcome = Outcome.fromRank(attacker.rank, defender.rank)
+				outcome = Outcome.fromRanks(attacker.rank, defender.rank)
 				results=[(outcome,1.0,board.copy())]
 				
 			elif attacker.known: # to unknown
@@ -76,13 +75,14 @@ class Node(object):
 			moveResults.append([moveType,move,results])
 
 		for moveType,move,results in moveResults:
+			print("Move type=",moveType," move=",move," results=",[(i[0],i[1]) for i in results])
 			if len(results)==1 and results[0][0]==Outcome.LOSS:
 				#print("Skipping losing move")
 				continue
 
 			#prenode = outcome known before taking the move.  post-node = outcome known after
 			attackerKnowsSomethingWeDont = moveType in (UNKNOWN_ATT, FUTURE_KNOWN_DEF)
-			if not attackerKnowsSomethingWeDont:
+			if attackerKnowsSomethingWeDont:
 				# This is the case where the attacker has perfect knowledge, be we (the AI) don't
 				# In this case, attacker will only take winning moves, but we have to guess if the move is winning
 				# This is why losses are excluded and moves are given a probability depending on whether they are available
@@ -123,18 +123,21 @@ class Node(object):
 		
 		candidates=list(self.children)
 		prob=1.0
+		value=0.0
 		bestMove=minimax(candidates, key=lambda node:node.value)
-		if bestMove.nodeType == self.MAYBE_MOVE_NODE:
-			value = prob*bestMove.value
+		
+		while bestMove.nodeType == self.MAYBE_MOVE_NODE:
+			value += prob*bestMove.prob*bestMove.value
 			prob *= (1-bestMove.prob)
 			candidates = [node for node in candidates if not (node.nodeType==self.MAYBE_MOVE_NODE and node.move.fromPos==bestMove.move.fromPos) ]
 			if len(candidates)==0:
-				raise Exception("What now?")
+				# All maybe moves?  This shouldn't happen...
+				raise Exception("All moves are maybe moves??  What now?")
 			bestMove=minimax(candidates, key=lambda node:node.value)
-			# Loop here
-		else:
-			self.value = bestMove.value
-		return self.value
+		
+		value += prob*bestMove.value
+		self.value = value
+		return value
 
 	def getMoveValue(self,player):
 		if not self.nodeType in (self.MOVE_NODE, self.MAYBE_MOVE_NODE):
@@ -142,7 +145,20 @@ class Node(object):
 		self.value = sum(child.getBoardValue(player)*child.prob for child in self.children)
 		return self.value
 
-	"""	
+	def bestMove(self):
+		if self.nodeType != self.BOARD_NODE:
+			raise Exception("Must be called on board node")
+		#candidates = [move for move in self.children if move.nodeType==self.MOVE_NODE]
+		#if len(candidates)==0:
+		#	raise Exception("No valid moves")
+		if not all([child.nodeType==self.MOVE_NODE for child in self.children]):
+			print(self.children)
+			raise Exception("All children should be move nodes (maybe-moves are only for opponent and future moves)")
+		return max(self.children,key=lambda child:child.value)
+
+	def __repr__(self):
+		return "[NODE %s move=%s outcome=%s prob=%.2g value=%.1f]"%(self.nodeType,str(self.move),str(self.outcome),self.prob,self.value)
+
 	def getLeafs(self):
 		if len(self.children)==0:
 			return [self]
@@ -151,44 +167,12 @@ class Node(object):
 			for child in self.children:
 				arr.extend(child.getLeafs())
 			return arr
-	
-	def getChildType(self):
-		if len(self.children)==0:
-			return self.LEAF
-		else:
-			return self.children[0].nodeType
-			
+				
 	def getCumProd(self,prior=1.0):
 		self.cumProb=self.prob*prior
 		for child in self.children:
 			child.getCumProd(self.cumProb)
-	
-	def getValue(self, player):
-		childType=self.getChildType()
-		if childType==self.LEAF:
-			self.value = self.board.heuristic()
-		elif childType==self.MOVE_NODE:
-			movePlayer = self.children[0].player
-			minimax = max if movePlayer==player else min
-			self.value=minimax(child.getValue(player) for child in self.children)
-		elif childType==self.PRE_NODE or childType==self.POST_NODE:
-			self.value = sum(child.getValue(player)*child.prob for child in self.children)
-		return self.value
-	
-	def greedySearch(self):
-		childType=self.getChildType()
-		if childType==self.LEAF or childType==self.POST_NODE:
-			raise Exception("This should not happen")
-		elif childType==self.PRE_NODE:
-			raise Exception("This should not happen either - since pre-nodes are only for opponent moves")
-			#node=max(self.children,key=lambda child:child.prob)
-			#return node.greedySearch()
-		elif childType==self.MOVE_NODE:
-			node=max(self.children,key=lambda child:child.value)
-			return node
-	
-	def __repr__(self):
-		return "[NODE %s move=%s outcome=%s prob=%.2g value=%.1f]"%(self.nodeType,str(self.move),str(self.outcome),self.prob,self.value)
+		
 		
 	def expandAll(self,player, level):
 		queue=[self]
@@ -209,38 +193,28 @@ class Node(object):
 			queue=leafs
 		self.getCumProd()
 		self.getValue(player)
-	
-	def getMoves(self):
-		if self.nodeType==self.MOVE_NODE:
-			return [self]
-		else:
-			arr=[]
-			for child in self.children:
-				arr.extend(child.getMoves())
-			return arr
-	"""
 			
 		
 """
 01 function alphabeta(node, depth, α, β, maximizingPlayer)
-02      if depth = 0 or node is a terminal node
-03          return the heuristic value of node
-04      if maximizingPlayer
-05          v := -∞
-06          for each child of node
-07              v := max(v, alphabeta(child, depth – 1, α, β, FALSE))
-08              α := max(α, v)
-09              if β ≤ α
-10                  break (* β cut-off *)
-11          return v
-12      else
-13          v := +∞
-14          for each child of node
-15              v := min(v, alphabeta(child, depth – 1, α, β, TRUE))
-16              β := min(β, v)
-17              if β ≤ α
-18                  break (* α cut-off *)
-19          return v
+02	  if depth = 0 or node is a terminal node
+03		  return the heuristic value of node
+04	  if maximizingPlayer
+05		  v := -∞
+06		  for each child of node
+07			  v := max(v, alphabeta(child, depth – 1, α, β, FALSE))
+08			  α := max(α, v)
+09			  if β ≤ α
+10				  break (* β cut-off *)
+11		  return v
+12	  else
+13		  v := +∞
+14		  for each child of node
+15			  v := min(v, alphabeta(child, depth – 1, α, β, TRUE))
+16			  β := min(β, v)
+17			  if β ≤ α
+18				  break (* α cut-off *)
+19		  return v
 """
 
 
@@ -248,7 +222,7 @@ class Node(object):
 def getBestMove(board,player):
 	tree=Node(ProbBoard(board,player))
 	tree.expand(player)
-	node=tree.greedySearch()
+	node = tree.bestMove()
 	print(node.move,node.value,node.cumProb)
 	return node.move
 
@@ -269,6 +243,6 @@ def doMoves(board,n):
 #node=Node(ProbBoard(board,1))
 #node.expand(1)
 
-node=Node(ProbBoard(board2,2))
-node.expandAll(2,2)
+#node=Node(ProbBoard(board2,2))
+#node.expandAll(2,2)
 
