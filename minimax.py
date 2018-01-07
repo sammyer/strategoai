@@ -59,9 +59,16 @@ class Node(object):
 				moveType=KNOWN
 				outcome = Outcome.fromRanks(attacker.rank, defender.rank)
 				results=[(outcome,1.0,board.copy())]
+			
+			elif attacker.known and defender.seen:
+				# Defender seen but not known.
+				# This is looking ahead to a move in the future after we have seen the defender but in the present
+				# it is unknown
+				moveType = FUTURE_KNOWN_DEF
+				results = self.board.splitOnDefender(move.toPos, attacker.rank)
 				
 			elif attacker.known: # to unknown
-				moveType = FUTURE_KNOWN_DEF if attacker.seen else UNKNOWN_DEF
+				moveType = UNKNOWN_DEF
 				results = self.board.splitOnDefender(move.toPos, attacker.rank)
 				
 			elif defender.known:
@@ -75,7 +82,7 @@ class Node(object):
 			moveResults.append([moveType,move,results])
 
 		for moveType,move,results in moveResults:
-			print("Move type=",moveType," move=",move," results=",[(i[0],i[1]) for i in results])
+			#print("Move type=",moveType," move=",move," results=",[(i[0],i[1]) for i in results])
 			if len(results)==1 and results[0][0]==Outcome.LOSS:
 				#print("Skipping losing move")
 				continue
